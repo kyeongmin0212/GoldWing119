@@ -3,9 +3,9 @@
 import { SCENARIOS } from "../src/data/scenarioData.ts";
 import { HOTSPOTS } from "../src/data/congestionDb.ts";
 import { DRONE_BASES, DRONE_POOL_TOTAL } from "../src/data/droneBases.ts";
-import { distLatLng, formatClock, mapJurisdiction } from "../src/lib/geo.ts";
+import { distLatLng, formatClock, mapJurisdiction, truckAt } from "../src/lib/geo.ts";
 import { decideDispatch } from "../src/lib/dispatch.ts";
-import { buildSimPlan, type SimPlan } from "../src/lib/simulation.ts";
+import { buildSimPlan, droneAt, type SimPlan } from "../src/lib/simulation.ts";
 import type { RouteChoice, Scenario } from "../src/types/drone.ts";
 
 const expected = { regional: 1, urban: 1 } as const;
@@ -20,6 +20,23 @@ function followsRoad(plan: SimPlan, droneIdx: number): boolean {
   return d.points.slice(startK).every((p) => line.some((q) => distLatLng(p, q) < 0.06));
 }
 
+/** 출동 소방서 드론은 이륙부터 정찰 구간 도착까지 늘 소방차보다 앞(도로상 위치)에 있어야 한다 */
+function staysAhead(plan: SimPlan, droneIdx: number): boolean {
+  const d = plan.drones[droneIdx];
+  if (distLatLng(d.assignment.base.position, plan.truck.points[0]) >= 0.5) return true;
+  const tools = plan.route.road.tools;
+  let idx = 0;
+  for (let t = d.launchSec + 60; t <= d.scanStartSec; t += 15) {
+    const dp = droneAt(d, t);
+    const tp = truckAt(plan.truck, t).pos;
+    const fd = tools.nearest([dp.lat, dp.lng]).f;
+    const ft = tools.nearest([tp.lat, tp.lng]).f;
+    idx++;
+    if (fd + 1e-4 < ft) return false;
+  }
+  return idx > 0;
+}
+
 function report(sc: Scenario, plan: SimPlan, label: string) {
   console.log(`  ${label} 소방차 현장 도착 ${formatClock(plan.truck.totalSec)} (${plan.truck.totalKm.toFixed(1)}km)`);
   plan.drones.forEach((d, i) => {
@@ -27,6 +44,7 @@ function report(sc: Scenario, plan: SimPlan, label: string) {
     console.log(`     정찰구간 도착 드론 ${formatClock(d.scanStartSec)} / 소방차 ${formatClock(d.truckEntrySec)} → 선행 ${formatClock(d.leadSec)}`);
     if (d.leadSec < 180 || d.leadSec > 300) fail(`${label} ${d.assignment.droneId} 선행 시간 ${formatClock(d.leadSec)} 이 3~5분 범위 밖`);
     if (label !== "[우회]" && !followsRoad(plan, i)) fail(`${label} ${d.assignment.droneId} 정찰 궤적이 소방차 도로를 벗어남`);
+    if (!staysAhead(plan, i)) fail(`${label} ${d.assignment.droneId} 출동 소방서 드론이 소방차 뒤로 처짐`);
   });
   for (const det of plan.detections) {
     const vio = sc.violations.find((x) => x.id === det.violationId)!;

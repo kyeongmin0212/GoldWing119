@@ -29,7 +29,7 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
     blockage: {
       kind: "parking",
       segIndex: 4,
-      position: { lat: 35.12548, lng: 126.90745 },
+      position: { lat: 35.125445, lng: 126.90693 },
       label: "봉선2로 불법주차 2대 — 소방차 진입 곤란 (가상)",
       short: "불법주차 · 진입 곤란",
       blockedSpeedKmh: 3,
@@ -55,7 +55,7 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
         plate: "75나 7712",
         vehicleType: "승합차 (회색)",
         reason: "소방자동차 전용구역 주차 (공동주택 진입로)",
-        position: { lat: 35.1255, lng: 126.908 },
+        position: { lat: 35.12545, lng: 126.90698 },
         locationLabel: "전남광주통합특별시 남구 봉선동 공동주택 진입로 (가상 지점)",
         confidence: 0.88,
       },

@@ -21,7 +21,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-BS",
     name: "봉선동 현장 진입로 불법주정차 다발",
     kind: "불법주정차다발",
-    position: { lat: 35.12548, lng: 126.90745 },
+    position: { lat: 35.125445, lng: 126.90693 },
     source: "가상 (실서비스: 안전신문고 신고 이력)",
   },
   {

@@ -102,14 +102,34 @@ function planDrone(a: DroneAssignment, route: ScenarioRoute, truck: TruckTimelin
   const lastVertex = a.cluster.lastSeg + 1 >= truck.points.length - 2 ? truck.points.length - 1 : a.cluster.lastSeg + 1;
   const scanPts = road.tools.sub(road.fr[first], road.fr[lastVertex]).map(toLatLng);
   const entry = scanPts[0];
-  const flight = planFlight(a.base.position, entry, []);
-  const flightSec = (flight.plannedKm / DRONE_SPEED_KMH) * 3600;
+  // 출동 소방서 드론(거점 = 소방차 출발지)은 소방차가 갈 도로를 따라 앞서 비행해 정찰 구간에 들어간다.
+  // 다른 소방서에서 오는 드론은 거점 → 정찰 구간 입구 직선.
+  const fromStation = distLatLng(a.base.position, truck.points[0]) < 0.5;
+  const flight: FlightPlan = fromStation
+    ? (() => {
+        // 도로를 따라가되 골목 굽이는 펴서 난다 (도로에서 0.2km 안쪽으로 단순화)
+        const path = simplify([a.base.position, ...road.tools.sub(0, road.fr[first]).map(toLatLng)], 0.2);
+        let km = 0;
+        for (let i = 1; i < path.length; i++) km += distLatLng(path[i - 1], path[i]);
+        return { path, directKm: distLatLng(a.base.position, entry), plannedKm: km, blockedBy: [], avoided: false };
+      })()
+    : planFlight(a.base.position, entry, []);
   const truckEntrySec = truck.times[first];
-  // 권장 이륙 시각: 소방차보다 TARGET_LEAD_SEC 먼저 도착하도록. 늦으면 즉시 이륙.
-  const launchSec = Math.max(minLaunch, truckEntrySec - TARGET_LEAD_SEC - flightSec - LAUNCH_PREP_SEC);
+  let launchSec: number;
+  let cruise = DRONE_SPEED_KMH;
+  if (fromStation) {
+    // 소방차와 같이 출동(즉시 이륙)해 늘 소방차 앞에서 날도록, 정찰 구간에 TARGET_LEAD_SEC 먼저 닿는 속도로 순항 (최대 54km/h)
+    launchSec = minLaunch;
+    const avail = truckEntrySec - TARGET_LEAD_SEC - LAUNCH_PREP_SEC - launchSec;
+    if (avail > 0) cruise = Math.min(DRONE_SPEED_KMH, Math.max(20, (flight.plannedKm / avail) * 3600));
+  } else {
+    // 권장 이륙 시각: 소방차보다 TARGET_LEAD_SEC 먼저 도착하도록. 늦으면 즉시 이륙.
+    const flightSec = (flight.plannedKm / DRONE_SPEED_KMH) * 3600;
+    launchSec = Math.max(minLaunch, truckEntrySec - TARGET_LEAD_SEC - flightSec - LAUNCH_PREP_SEC);
+  }
   const takeoff = launchSec + LAUNCH_PREP_SEC;
   const points = [flight.path[0], ...flight.path, ...scanPts.slice(1)];
-  const speeds = [...flight.path.slice(1).map(() => DRONE_SPEED_KMH), ...scanPts.slice(1).map(() => SCAN_SPEED_KMH)];
+  const speeds = [...flight.path.slice(1).map(() => cruise), ...scanPts.slice(1).map(() => SCAN_SPEED_KMH)];
   const times = [launchSec, ...timeline(points.slice(1), speeds, takeoff)];
   const scanStartSec = times[flight.path.length];
   return {
@@ -124,6 +144,36 @@ function planDrone(a: DroneAssignment, route: ScenarioRoute, truck: TruckTimelin
     truckEntrySec,
     leadSec: truckEntrySec - scanStartSec,
   };
+}
+
+/** 선 단순화 (Douglas–Peucker, 허용 오차 tolKm) — 근거리라 위경도를 평면 km 로 근사 */
+function simplify(pts: LatLng[], tolKm: number): LatLng[] {
+  if (pts.length < 3) return pts;
+  const lat0 = (pts[0].lat * Math.PI) / 180;
+  const xy = pts.map((p) => [p.lng * 111.32 * Math.cos(lat0), p.lat * 110.57]);
+  const keep = new Array(pts.length).fill(false);
+  keep[0] = keep[pts.length - 1] = true;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [i, j] = stack.pop()!;
+    const [ax, ay] = xy[i];
+    const [bx, by] = xy[j];
+    const len = Math.hypot(bx - ax, by - ay) || 1e-9;
+    let best = -1;
+    let bestD = tolKm;
+    for (let k = i + 1; k < j; k++) {
+      const d = Math.abs((bx - ax) * (ay - xy[k][1]) - (ax - xy[k][0]) * (by - ay)) / len;
+      if (d > bestD) {
+        bestD = d;
+        best = k;
+      }
+    }
+    if (best >= 0) {
+      keep[best] = true;
+      stack.push([i, best], [best, j]);
+    }
+  }
+  return pts.filter((_, k) => keep[k]);
 }
 
 function finish(d: DroneSim): DroneSim {
@@ -154,7 +204,7 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     for (let s = Math.floor(scout.scanStartSec); s <= Math.ceil(scout.totalSec); s++) {
       const dd = distLatLng(droneAt(scout, s), bl.position);
       if (dd < best.d - 1e-6) best = { s, d: dd };
-      if (dd < 0.03) break;
+      if (dd < 0.015) break;
     }
     const stay = routeAndTruck(sc, "base", true).truck;
     const det = routeAndTruck(sc, "detour", false).truck;
