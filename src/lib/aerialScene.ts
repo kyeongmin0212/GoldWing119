@@ -246,9 +246,7 @@ export function createAerialScene(seed = 1) {
         g.fillStyle = `rgba(${v},${v + 2},${v + 5},${0.35 + hash(i, 2, seed) * 0.4})`;
         g.fillRect(hash(i, 3, seed) * 160, hash(i, 4, seed) * 160, 1 + hash(i, 5) * 1.6, 1 + hash(i, 6) * 1.6);
       }
-      g.fillStyle = "rgba(40,42,46,0.22)";
-      g.fillRect(20, 30, 46, 22);
-      g.fillRect(100, 110, 30, 40);
+      // 땜질 자국(어두운 네모)은 넣지 않는다 — 무늬가 화면에 고정돼 차도 위에 그림자처럼 떠 보였음
     }
     if (!asphalt) asphalt = ctx.createPattern(asphaltSrc, "repeat");
     return asphalt ?? "#5f6368";
