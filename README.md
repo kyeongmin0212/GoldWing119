@@ -91,7 +91,7 @@ docker compose logs -f app      # 확인
   `orchestrate\.venv\Scripts\orchestrate.exe agents deploy --name goldenwing_gjw_supervisor`
 - 로컬 도구 점검: `py -3.12 -I -X utf8 orchestrate/gjw_tools.py` / LIVE 시험: `orchestrate\.venv\Scripts\python.exe -I -X utf8 orchestrate/eval_live.py`
 
-## 지식(RAG) 문서 4개 — `gjw_rules_kb`
+## 지식(RAG) 문서 5개 — `gjw_rules_kb`
 
 Orchestrate 가 문서를 나눠 임베딩해 벡터 색인에 넣고, 질문과 가까운 문단을 찾아 근거로 답합니다.
 
@@ -100,7 +100,8 @@ Orchestrate 가 문서를 나눠 임베딩해 벡터 색인에 넣고, 질문과
 | `orchestrate/gjw_law_text.txt` | 관련 법령 조문 원문 발췌 (국가법령정보센터 현행본, 2026-11-20 열람) |
 | `orchestrate/gjw_rules_doc.txt` | 단속 규정 요약 |
 | `orchestrate/gjw_drone_sop.txt` | 드론 선행 출동 운용 절차서 (가상) |
-| `orchestrate/gjw_report_form.txt` | 지자체 통보 양식과 작성 요령 (가상) |
+| `orchestrate/gjw_report_form.txt` | 지자체 통보 양식과 작성 요령 (가상) — 초안만, 담당자가 별도 통보 |
+| `orchestrate/gjw_procedure.txt` | 시제품 사용 절차 (가상) — 투입 승인 → 동시 출발 → 막힘 발견 → 우회로 승인 → 통보 초안 검토 |
 
 시험 기록: `orchestrate/eval_results_run*.csv` → 최종 `eval_results.csv` (10문항 10/10, 실패·수정 이력 포함).
 
@@ -119,6 +120,6 @@ Orchestrate 가 문서를 나눠 임베딩해 벡터 색인에 넣고, 질문과
 | `src/data/*` | 혼잡 DB, 드론 거점(소방서 6곳 × 3대 = 18대, 가상 위치), 시나리오 2개(도로 막힘·불법주차, 각각 우회로 포함), 실제 도로 모양. 공역 DB(관제권·회피구역)는 보관만 — 추후 보완 |
 | `src/app/api/sync/route.ts`, `src/middleware.ts` | 다른 기기 화면 중계, 접속 비밀번호(선택) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `deploy.env.example` | 서버 배포 |
-| `orchestrate/` | 에이전트 YAML 5개, Python 도구 6개, 지식 문서 4개, 업로드·LIVE 설정·시험 스크립트 |
+| `orchestrate/` | 에이전트 YAML 5개, Python 도구 6개, 지식 문서 5개, 업로드·LIVE 설정·시험 스크립트 |
 
 공식 출처는 `G-J_골든타임윙_참고자료_출처.md`(바탕 화면\IBM AI) 참고.
