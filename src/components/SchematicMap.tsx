@@ -5,6 +5,7 @@
 
 import { useMemo } from "react";
 import { MAP_KM, formatClock, speedClass, toXY, truckAt } from "@/lib/geo";
+import { maskPlate } from "@/lib/plate";
 import { droneAt } from "@/lib/simulation";
 import type { SimView } from "@/lib/simView";
 import type { LatLng } from "@/types/drone";
@@ -240,7 +241,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
             <g key={v.id} transform={`translate(${p.x},${p.y})`} onClick={() => sim.setSelectedId(v.id)} style={{ cursor: "pointer" }}>
               <rect x="-6" y="-6" width="12" height="12" fill="#fff" stroke={color} strokeWidth="2.2" />
               <text x="10" y="17" fill={color} fontSize={11 * fs} fontWeight={700} stroke="#fff" strokeWidth="3" paintOrder="stroke">
-                {v.plate}
+                {maskPlate(v.plate)}
               </text>
             </g>
           );
@@ -279,7 +280,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
           <div className="border border-line bg-white/95 px-2.5 py-1.5">
             <span className="text-muted">소방차 현장 도착 예정 </span>
             <b className="font-mono">T+{formatClock(plan.truck.totalSec)}</b>
-            <span className="text-faint"> (평시 {formatClock(decision.normalSec)})</span>
+            <span className="text-faint"> {status === "rerouting" ? "(경로 선택 대기 · 사고 반영 전)" : `(평시 ${formatClock(decision.normalSec)})`}</span>
           </div>
           {launch &&
             plan.drones.map((d) => (

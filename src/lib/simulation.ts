@@ -180,6 +180,19 @@ function simplify(pts: LatLng[], tolKm: number): LatLng[] {
   return pts.filter((_, k) => keep[k]);
 }
 
+/** t 초까지의 비행만 남기고 자른다 (그 순간 위치를 끝점으로) */
+function trimAt(d: DroneSim, t: number): DroneSim {
+  const points: LatLng[] = [];
+  const times: number[] = [];
+  for (let k = 0; k < d.points.length && d.times[k] <= t; k++) {
+    points.push(d.points[k]);
+    times.push(d.times[k]);
+  }
+  points.push(droneAt(d, t));
+  times.push(t);
+  return { ...d, points, times, totalSec: t };
+}
+
 function finish(d: DroneSim): DroneSim {
   return { ...d, totalSec: d.times[d.times.length - 1] };
 }
@@ -263,8 +276,18 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
   const drones: DroneSim[] = [];
   for (const a of assignments) {
     if (scout && a === inA) {
-      // 정찰 구간 안 막힘: 판단과 상관없이 정찰을 이어 가며 주차 차량 증거 촬영
-      drones.push(scout);
+      if (blockage && choice === "detour") {
+        // 우회 승인: 발견 지점에서 우회로 시작점으로 가서, 소방차가 갈 우회로를 앞서 비행하며 길 확인
+        const d = trimAt(scout, blockage.atSec);
+        const r = route.road;
+        const from = bl!.detour.fromSeg;
+        const rejoin = from + bl!.detour.segments.length;
+        extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), SCAN_SPEED_KMH);
+        drones.push(finish(d));
+      } else {
+        // 기존 경로 유지(또는 판단 전): 정찰을 이어 가며 막힌 구간·주차 차량 확인
+        drones.push(scout);
+      }
       continue;
     }
     if (scout && a === scoutA) {
@@ -274,9 +297,9 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
         const r = route.road;
         const from = bl!.detour.fromSeg;
         const rejoin = from + bl!.detour.segments.length;
-        extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), DRONE_SPEED_KMH);
+        extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), SCAN_SPEED_KMH);
       } else if (blockage && choice === "stay") {
-        // 막힌 구간을 따라가며 길터주기 방송
+        // 막힌 구간을 따라가며 확인
         const r = route.road;
         const fB = r.tools.nearest([bl!.position.lat, bl!.position.lng], r.idx[bl!.segIndex]).f;
         extend(d.points, d.times, r.tools.sub(Math.max(0, fB - 0.025 / r.tools.km), r.fr[bl!.segIndex + 1]).slice(1).map(toLatLng), SCAN_SPEED_KMH);

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
 import { formatClock, speedClass, truckAt } from "@/lib/geo";
+import { maskPlate } from "@/lib/plate";
 import { scenarioRoute } from "@/lib/road";
 import { droneAt } from "@/lib/simulation";
 import type { SimView } from "@/lib/simView";
@@ -280,7 +281,7 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
       const done = v.status === "reviewed";
       const color = done ? C.ok : C.avoid;
       const key = `${v.status}`;
-      const html = `<span style="display:inline-block;width:12px;height:12px;background:#fff;border:2.5px solid ${color}"></span>${label(v.plate, color, "margin-left:3px")}`;
+      const html = `<span style="display:inline-block;width:12px;height:12px;background:#fff;border:2.5px solid ${color}"></span>${label(maskPlate(v.plate), color, "margin-left:3px")}`;
       const cur = dyn.viol.get(v.id);
       if (!cur) {
         // 진로방해 차량은 소방차가 지나는 실제 도로 위 가장 가까운 지점에 표시
@@ -321,7 +322,7 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
           <div className="border border-line bg-white/95 px-2.5 py-1.5">
             <span className="text-muted">소방차 현장 도착 예정 </span>
             <b className="font-mono">T+{formatClock(plan.truck.totalSec)}</b>
-            <span className="text-faint"> (평시 {formatClock(decision.normalSec)})</span>
+            <span className="text-faint"> {status === "rerouting" ? "(경로 선택 대기 · 사고 반영 전)" : `(평시 ${formatClock(decision.normalSec)})`}</span>
           </div>
           {launch &&
             plan.drones.map((d) => (

@@ -12,6 +12,7 @@ import { LANE, ROAD_HALF, createAerialScene } from "@/lib/aerialScene";
 import { formatClock, formatLatLng, truckAt, type TruckTimeline } from "@/lib/geo";
 import type { ScenarioRoad } from "@/lib/road";
 import { droneAt, type DroneSim } from "@/lib/simulation";
+import { maskPlate } from "@/lib/plate";
 import type { SimView } from "@/lib/simView";
 import type { LatLng, ViolationRecord, ViolationSample } from "@/types/drone";
 
@@ -133,7 +134,7 @@ export default function DroneVisionFeed({
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
     let last = performance.now();
-    let transitS = 0;
+    let alongDisp = 0;
     let yieldAmt = 0;
     let zoom = 1;
     let scene = createAerialScene(3);
@@ -176,7 +177,7 @@ export default function DroneVisionFeed({
       const lk = lockStartRef.current;
       if (!lk || lk.id !== sample.id) lockStartRef.current = { id: sample.id, at: now };
       const elapsed = (now - (lockStartRef.current?.at ?? now)) / 1000;
-      const plate = sample.plate;
+      const plate = maskPlate(sample.plate);
       const shown = plate.slice(0, Math.min(plate.length, Math.floor(elapsed * 8)));
       const lx = !boxed ? bx : bx > 160 ? bx - 150 : bx + bw + 10;
       const ly = by;
@@ -215,18 +216,28 @@ export default function DroneVisionFeed({
         scene = createAerialScene(sceneSeed);
       }
 
-      // 드론 위치 → 가상 장면 위치 (정찰 중엔 경로를 따라 간 거리, 순항 중엔 빠르게 흘러감)
+      // 드론 위치 → 가상 장면 위치: 순항·정찰 모두 소방차 경로를 따라 실제로 간 거리로 (속도가 갑자기 바뀌지 않게)
+      // 경로가 바뀌는 순간(우회 승인) 생기는 작은 차이는 부드럽게 따라간다
       const flying = st.phase === "transit" || st.phase === "scan";
-      const droneAlong = st.phase === "scan" && st.drone ? alongRoad(droneAt(st.drone, st.simTime), st.roadPts, st.cum).along : 0;
-      if (st.phase === "transit") transitS += 260 * dt;
-      const s = st.phase === "scan" ? 2000 + droneAlong * UPM : transitS;
+      const target = flying && st.drone ? alongRoad(droneAt(st.drone, st.simTime), st.roadPts, st.cum).along : 0;
+      if (!flying || Math.abs(target - alongDisp) > 400) alongDisp = target;
+      else alongDisp += (target - alongDisp) * Math.min(1, dt * 3);
+      const droneAlong = alongDisp;
+      const s = 2000 + droneAlong * UPM;
       zoom += ((st.phase === "transit" ? 0.55 : 1) - zoom) * Math.min(1, dt * 3);
       yieldAmt += ((st.yielding ? 1 : 0) - yieldAmt) * Math.min(1, dt * 1.5);
       const toWy = (alongM: number) => s + (alongM - droneAlong) * UPM;
       const scanning = st.phase === "scan";
-      const blockWy = scanning && st.blockage?.kind === "accident" ? toWy(alongRoad(st.blockage.pos, st.roadPts, st.cum).along) : undefined;
+      /** 지금 경로(우회 승인 뒤엔 우회로) 위에 있는 지점만 장면에 둔다 — 40m 넘게 떨어지면 null */
+      const onRoute = (p: LatLng): number | null => {
+        const r = alongRoad(p, st.roadPts, st.cum);
+        return r.dist < 40 ? toWy(r.along) : null;
+      };
+      const blockAt = st.blockage ? onRoute(st.blockage.pos) : null;
+      const blockWy = scanning && st.blockage?.kind === "accident" && blockAt !== null ? blockAt : undefined;
+      const parkedAt = st.parked.map((pk) => onRoute(pk.sample.position));
       const keepClearWy = scanning
-        ? [...st.parked.map((pk) => toWy(alongRoad(pk.sample.position, st.roadPts, st.cum).along)), ...(st.blockage?.kind === "parking" ? [toWy(alongRoad(st.blockage.pos, st.roadPts, st.cum).along)] : [])]
+        ? [...parkedAt, st.blockage?.kind === "parking" ? blockAt : null].filter((x): x is number => x !== null)
         : [];
       const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy });
       // 먼 곳은 옅은 안개 (기울인 카메라의 원근감)
@@ -248,8 +259,8 @@ export default function DroneVisionFeed({
 
         // 막힌 지점
         if (st.blockage) {
-          const wy = wyOf(alongRoad(st.blockage.pos, pts, cum).along);
-          if (visible(wy)) {
+          const wy = blockAt ?? Number.NaN;
+          if (blockAt !== null && visible(wy)) {
             if (st.blockage.kind === "accident") {
               v.car(ctx, LANE * 0.85, wy - 14, -0.9, "#7f1d1d", 0, { plate: "34마 8120" });
               v.car(ctx, LANE * 0.45 - 3, wy, 0.6, "#e5e7eb", 0, { plate: "61라 2207" });
@@ -287,8 +298,10 @@ export default function DroneVisionFeed({
 
         // 진로방해(주정차) 차량 — 도로 오른쪽 가장자리. 인식한 차량이 화면을 벗어나면 인식 결과만 왼쪽 위에 고정
         let lockDrawn = false;
-        for (const pk of st.parked) {
-          const wy = wyOf(alongRoad(pk.sample.position, pts, cum).along);
+        for (const [pi, pk] of st.parked.entries()) {
+          const at = parkedAt[pi];
+          if (at === null) continue;
+          const wy = at;
           if (!visible(wy)) continue;
           const truckLike = pk.sample.vehicleType.includes("트럭") || pk.sample.vehicleType.includes("화물");
           const color = truckLike ? "#94a3b8" : pk.sample.vehicleType.includes("흰") ? "#f8fafc" : pk.sample.vehicleType.includes("회색") ? "#8b9097" : "#2b2d31";
@@ -406,11 +419,11 @@ export default function DroneVisionFeed({
   const parkingSeen = !!blk && blk.kind === "parking" && phase === "scan" && simTime >= blk.atSec;
   const scoutBanner = parkingSeen && blk
     ? sim.routeChoice === "detour"
-      ? { text: `다른 진입 경로 안내함 — ${blk.summary} · 주차 차량 증거 촬영 중`, cls: "bg-emerald-700 text-white" }
+      ? { text: `다른 진입 경로 안내함 — 드론이 그 길을 앞서 확인 중 (${blk.summary})`, cls: "bg-emerald-700 text-white" }
       : sim.routeChoice === "stay"
         ? { text: `기존 경로 유지 — ${blk.label} · 주차 차량 증거 촬영 중`, cls: "bg-fire text-white" }
         : { text: `진입로 불법주차 확인 — ${blk.label} · 상황실 경로 판단 중`, cls: "bg-fire text-white" }
-    : !blk || !ahead
+    : !blk || !(ahead || (phase === "scan" && simTime >= blk.atSec))
     ? null
     : simTime < blk.atSec
       ? { text: "소방차 경로를 따라 전방 선행 정찰 중", cls: "bg-black/60 text-white" }

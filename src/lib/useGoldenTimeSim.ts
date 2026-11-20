@@ -10,6 +10,7 @@ import { DRONE_BASES } from "@/data/droneBases";
 import { SCENARIOS } from "@/data/scenarioData";
 import { decideDispatch } from "@/lib/dispatch";
 import { formatClock, mapJurisdiction } from "@/lib/geo";
+import { buildReportDraft } from "@/lib/report";
 import { buildSimPlan } from "@/lib/simulation";
 import { publishSnapshot, type SimSnapshot } from "@/lib/simBridge";
 import type {
@@ -57,6 +58,8 @@ export function useGoldenTimeSim() {
   const [speed, setSpeed] = useState(30);
   const [simTime, setSimTime] = useState(0);
   const [violations, setViolations] = useState<ViolationRecord[]>([]);
+  const violationsRef = useRef<ViolationRecord[]>([]);
+  violationsRef.current = violations;
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [backend, setBackend] = useState<"live" | "mock" | "unknown">("unknown");
@@ -129,9 +132,49 @@ export function useGoldenTimeSim() {
     [addLog],
   );
 
+  // 통보 초안 요청 — 한 번에 하나씩(동시 호출 충돌 방지), 실패하면 한 번 더 시도, 그래도 실패하면 예비 초안(코드 양식)
+  const draftQueue = useRef<Promise<void>>(Promise.resolve());
+  const requestDraft = useCallback(
+    (v: ViolationSample, iso: string) => {
+      const gen = genRef.current;
+      const job = async () => {
+        if (gen !== genRef.current) return;
+        patchViolation(v.id, { status: "analyzing", fallback: false });
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            setBusyAgent("report");
+            if (backendRef.current === "live")
+              addLog("watsonx", `[${v.plate}] Orchestrate 감독 에이전트 호출${attempt > 1 ? " (다시 시도)" : ""} — 비전 검증 → 행정 신고 에이전트 순서로 처리 중 (보통 10~25초)`, "progress");
+            const res = await callAgent({ type: "violation_detected", violation: { ...v, detectedAtIso: iso }, threadId: threadRef.current });
+            if (gen !== genRef.current) return;
+            setBackend(res.mode);
+            if (res.threadId) threadRef.current = res.threadId;
+            noteFallback(res);
+            if (!(await playSteps(res, gen))) return;
+            patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message, sources: res.sources, fallback: false });
+            addLog(res.mode === "live" ? "watsonx" : "report", res.message, "success", res.sources);
+            return;
+          } catch (e) {
+            setBusyAgent(null);
+            if (gen !== genRef.current) return;
+            addLog("system", `[${v.plate}] 에이전트 호출 오류: ${e instanceof Error ? e.message : e}${attempt === 1 ? " — 2초 뒤 다시 시도" : ""}`, "warn");
+            if (attempt === 1) await sleep(2000);
+          }
+        }
+        // 두 번 다 실패 → 코드가 만든 예비 초안 (관할·법적 근거·양식은 원래도 코드가 결정)
+        const draft = buildReportDraft({ ...v, detectedAtIso: iso });
+        patchViolation(v.id, { status: "pending", draft, fallback: true, sources: ["지자체 통보 양식과 작성 요령"], agentMessage: "IBM 호출 실패 · 예비 초안" });
+        addLog("report", `[${v.plate}] IBM 호출 실패 → 예비 초안 표시 (코드 양식). [초안 다시 생성]으로 다시 요청할 수 있음`, "warn");
+      };
+      const next = draftQueue.current.then(job, job);
+      draftQueue.current = next.catch(() => {});
+      return next;
+    },
+    [addLog, playSteps, patchViolation, noteFallback],
+  );
+
   const detect = useCallback(
     async (v: ViolationSample, droneId: string, atSec: number) => {
-      const gen = genRef.current;
       const iso = new Date(baseDate(scenario.incident.reportedAt).getTime() + atSec * 1000).toISOString();
       const rec: ViolationRecord = { ...v, droneId, detectedAtSim: atSec, detectedAtIso: iso, status: "analyzing" };
       setViolations((vs) => [...vs, rec]);
@@ -139,25 +182,20 @@ export function useGoldenTimeSim() {
       setFocusDrone(droneId);
       addLog("vision", `[${droneId}] 진로 방해 차량 탐지 — ${v.plate}(가상) · ${v.reason} · 신뢰도 ${(v.confidence * 100).toFixed(0)}%`, "warn");
       addLog("vision", `번호판 OCR "${v.plate}" → 탐지 JSON을 IBM 에이전트로 전달`, "info");
-      try {
-        setBusyAgent("report");
-        if (backendRef.current === "live")
-          addLog("watsonx", `[${v.plate}] Orchestrate 감독 에이전트 호출 — 비전 검증 → 행정 신고 에이전트 순서로 처리 중 (보통 10~25초)`, "progress");
-        const res = await callAgent({ type: "violation_detected", violation: { ...v, detectedAtIso: iso }, threadId: threadRef.current });
-        if (gen !== genRef.current) return;
-        setBackend(res.mode);
-        if (res.threadId) threadRef.current = res.threadId;
-        noteFallback(res);
-        if (!(await playSteps(res, gen))) return;
-        patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message, sources: res.sources });
-        addLog(res.mode === "live" ? "watsonx" : "report", res.message, "success", res.sources);
-      } catch (e) {
-        setBusyAgent(null);
-        patchViolation(v.id, { status: "error" });
-        addLog("system", `에이전트 호출 오류: ${e instanceof Error ? e.message : e}`, "warn");
-      }
+      await requestDraft(v, iso);
     },
-    [scenario.incident.reportedAt, addLog, playSteps, patchViolation, noteFallback],
+    [scenario.incident.reportedAt, addLog, requestDraft],
+  );
+
+  /** [초안 다시 생성] — 오류·예비 초안 카드에서 다시 요청 */
+  const regenerateDraft = useCallback(
+    (id: string) => {
+      const v = violationsRef.current.find((x) => x.id === id);
+      if (!v || v.status === "analyzing") return;
+      addLog("system", `관제요원 [초안 다시 생성] — ${v.plate}`, "info");
+      void requestDraft(v, v.detectedAtIso);
+    },
+    [addLog, requestDraft],
   );
 
   // 이벤트 타임라인 (투입 결정 후에 구성)
@@ -281,16 +319,14 @@ export function useGoldenTimeSim() {
     addLog("route", `출동 경로 분석: 평시 ${formatClock(decision.normalSec)} → 예상 ${formatClock(decision.expectedSec)} (지연 ${formatClock(Math.max(0, decision.delaySec))})`, "info");
     const active = decision.matches.filter((m) => m.active);
     addLog("route", active.length ? `혼잡 DB 대조: 경로상 ${active.map((m) => m.hotspot.name).join(", ")}` : "혼잡 DB 대조: 경로상 활성 혼잡 구역 없음", active.length ? "warn" : "info");
-    // 시연: 투입 승인 단계 없이 권고대로 바로 출동 (승인 카드는 일단 뺌)
     addLog(
       "route",
       decision.recommend
-        ? `드론 투입 ${decision.recommend}대 — ${decision.assignments.map((a) => `${a.droneId}(${a.base.name})`).join(", ")} 소방차와 함께 출동`
-        : "드론 투입 불필요 판단 — 소방차만 출동",
+        ? `드론 투입 권고 ${decision.recommend}대 — 관제요원 승인 대기`
+        : "드론 투입 불필요 판단 — 관제요원 확인 대기",
       "progress",
     );
-    setLaunch(decision.recommend > 0);
-    setStatus("running");
+    setStatus("awaiting");
   }, [scenario, decision, addLog]);
 
   const start = useCallback(() => {
@@ -378,6 +414,7 @@ export function useGoldenTimeSim() {
         `경과: T+${formatClock(simTimeRef.current)}`,
         `드론 투입: ${launch ? plan.drones.map((d) => d.assignment.droneId).join(", ") : "없음"}`,
         `탐지 차량: ${violations.map((v) => `${v.plate}(${v.status}, ${mapJurisdiction(v.position).short})`).join(", ") || "없음"}`,
+        "[이 시제품의 절차 — 질문이 시연·시제품 사용법이면 이대로 답할 것] 에이전트는 지자체 통보 초안만 작성한다. 관제요원이 초안을 검토·보관([검토 완료])하고, 실제 통보는 담당자가 관할 지자체 시스템에서 별도로 진행한다. 시스템은 자동으로 통보·신고하지 않으며 위반 확정·과태료·견인 결정은 지자체가 한다. 드론 투입과 우회로 안내는 관제요원이 승인하고, 드론은 원격 조종자가 조종한다.",
       ].join("\n");
       try {
         setBusyAgent("watsonx");
@@ -459,6 +496,7 @@ export function useGoldenTimeSim() {
     confirmDispatch,
     chooseRoute,
     markReviewed,
+    regenerateDraft,
     dismiss,
     chat,
   };

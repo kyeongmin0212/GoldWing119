@@ -12,7 +12,7 @@ import type { ViolationRecord } from "@/types/drone";
 const STATUS: Record<ViolationRecord["status"], { label: string; cls: string }> = {
   analyzing: { label: "초안 작성 중", cls: "text-drone" },
   pending: { label: "초안 검토 대기", cls: "text-slow" },
-  reviewed: { label: "검토 완료 · 직접 통보", cls: "text-ok" },
+  reviewed: { label: "검토 완료 · 별도 통보 필요", cls: "text-ok" },
   dismissed: { label: "무시함", cls: "text-muted" },
   error: { label: "오류", cls: "text-fire" },
 };
@@ -58,7 +58,8 @@ export default function ViolationAlertCard({ sim }: { sim: SimController }) {
     <div className="box">
       <div className="box-head">
         진로방해 차량 통보 초안
-        <span className={`tag ml-auto ${st.cls}`}>{st.label}</span>
+        {v.fallback && <span className="tag ml-auto text-slow">IBM 호출 실패 · 예비 초안</span>}
+        <span className={`tag ${v.fallback ? "" : "ml-auto "}${st.cls}`}>{st.label}</span>
       </div>
       {violations.length > 1 && (
         <div className="flex gap-1 border-b border-line px-3 py-2">
@@ -157,6 +158,14 @@ export default function ViolationAlertCard({ sim }: { sim: SimController }) {
           <div className="mt-3 flex gap-2">
             <button className="btn" onClick={copy}>
               {copied === v.id ? "복사됨" : "초안 복사"}
+            </button>
+          </div>
+        )}
+        {(v.status === "error" || v.fallback) && (
+          <div className="mt-2 flex items-center gap-2 border border-slow bg-slow-soft px-2 py-1.5 text-[12px] text-slow">
+            {v.status === "error" ? "초안 작성 실패" : "IBM 호출이 실패해 코드 양식으로 만든 예비 초안입니다"}
+            <button className="btn ml-auto" onClick={() => sim.regenerateDraft(v.id)}>
+              초안 다시 생성
             </button>
           </div>
         )}

@@ -3,6 +3,7 @@
 // 소방차 태블릿 오른쪽 — 운전 중 한눈에 보는 큰 글씨 상태판 (조작 버튼 없음)
 
 import { formatClock, truckAt } from "@/lib/geo";
+import { maskPlate } from "@/lib/plate";
 import type { SimView } from "@/lib/simView";
 
 /** 지금 소방차 위치에서 toVertex 경유점까지 남은 실제 도로 거리(km) */
@@ -116,7 +117,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
             ? "탐지 없음"
             : violations.map((v) => (
                 <span key={v.id} className="block text-[18px]">
-                  {v.plate} · {v.locationLabel.replace(/^전남광주통합특별시 /, "").replace(/ \(.*\)$/, "")}
+                  {maskPlate(v.plate)} · {v.locationLabel.replace(/^전남광주통합특별시 /, "").replace(/ \(.*\)$/, "")}
                   <span className="ml-2 text-[15px] font-semibold text-muted">
                     {v.status === "reviewed" ? "통보 초안 검토 완료" : v.status === "dismissed" ? "상황실 확인" : v.status === "pending" ? "통보 초안 검토 대기" : "통보 초안 작성 중"}
                   </span>

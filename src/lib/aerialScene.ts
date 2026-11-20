@@ -4,6 +4,7 @@
 // 모든 것은 "도로 좌표"(u = 도로 중심에서 옆으로, wy = 도로를 따라 앞으로)로 배치해 굽은 길을 따라 휘어진다.
 // 카메라는 드론 진행 방향이 화면 위쪽이 되도록 돌아가고, 바로 아래가 아니라 앞으로 기울여(원근) 내려다본다.
 // 정찰 때는 낮게(약 18m) 날아 가까운 차의 번호판이 보이고, 순항 때는 높이 올라가 거의 바로 아래를 본다.
+import { maskPlate } from "./plate.ts";
 
 export const LANE = 15;
 export const ROAD_HALF = LANE * 2;
@@ -590,7 +591,7 @@ export function drawCar(ctx: Ctx, x: number, y: number, angle: number, k: number
       ctx.font = `bold ${ph * 0.82}px "Malgun Gothic", sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(opt.plate, 0, ph * 0.04, pw * 0.94);
+      ctx.fillText(maskPlate(opt.plate), 0, ph * 0.04, pw * 0.94);
       ctx.restore();
     }
   }

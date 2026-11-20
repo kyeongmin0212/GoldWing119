@@ -20,6 +20,16 @@ export default function RerouteCard({ sim }: { sim: SimController }) {
         {!deciding && <span className={`tag ${routeChoice === "detour" ? "text-ok" : "text-muted"}`}>{routeChoice === "detour" ? "우회로 안내함" : "기존 경로 유지"}</span>}
       </div>
       <div className="p-3">
+        {deciding && (
+          <div className="mb-3 flex gap-2">
+            <button className="btn btn-primary flex-1" onClick={() => sim.chooseRoute("detour")}>
+              우회로 안내 승인
+            </button>
+            <button className="btn" onClick={() => sim.chooseRoute("stay")}>
+              기존 경로 유지
+            </button>
+          </div>
+        )}
         <table className="kv">
           <tbody>
             <tr>
@@ -52,16 +62,6 @@ export default function RerouteCard({ sim }: { sim: SimController }) {
             </tr>
           </tbody>
         </table>
-        {deciding && (
-          <div className="mt-3 flex gap-2">
-            <button className="btn btn-primary flex-1" onClick={() => sim.chooseRoute("detour")}>
-              우회로 안내 승인
-            </button>
-            <button className="btn" onClick={() => sim.chooseRoute("stay")}>
-              기존 경로 유지
-            </button>
-          </div>
-        )}
         <p className="mt-2 text-[11px] text-muted">도착 시간은 가정 속도 기준입니다. 드론은 원격 조종자가 조종하며, 소방차 경로를 따라 앞서 비행하며 확인합니다.</p>
       </div>
     </div>

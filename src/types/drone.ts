@@ -177,6 +177,8 @@ export interface ViolationRecord extends ViolationSample {
   detectedAtIso: string;
   status: ViolationStatus;
   draft?: ReportDraft;
+  /** IBM 호출이 두 번 실패해 코드 양식으로 만든 예비 초안 */
+  fallback?: boolean;
   agentMessage?: string;
   /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
   sources?: string[];
