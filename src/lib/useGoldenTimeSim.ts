@@ -67,6 +67,7 @@ export function useGoldenTimeSim() {
   const backendRef = useRef<"live" | "mock" | "unknown">("unknown");
   const [focusDrone, setFocusDrone] = useState<string | null>(null);
 
+  // 질의 탭 전용 IBM 대화(스레드). 통보 초안은 차량마다 새 대화로 요청해 질의 답에 초안이 섞이지 않게 한다
   const threadRef = useRef<string | undefined>(undefined);
   const fallbackShown = useRef<string | null>(null);
   const firedRef = useRef<Set<string>>(new Set());
@@ -145,10 +146,9 @@ export function useGoldenTimeSim() {
             setBusyAgent("report");
             if (backendRef.current === "live")
               addLog("watsonx", `[${v.plate}] Orchestrate 감독 에이전트 호출${attempt > 1 ? " (다시 시도)" : ""} — 비전 검증 → 행정 신고 에이전트 순서로 처리 중 (보통 10~25초)`, "progress");
-            const res = await callAgent({ type: "violation_detected", violation: { ...v, detectedAtIso: iso }, threadId: threadRef.current });
+            const res = await callAgent({ type: "violation_detected", violation: { ...v, detectedAtIso: iso } });
             if (gen !== genRef.current) return;
             setBackend(res.mode);
-            if (res.threadId) threadRef.current = res.threadId;
             noteFallback(res);
             if (!(await playSteps(res, gen))) return;
             patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message, sources: res.sources, fallback: false });
