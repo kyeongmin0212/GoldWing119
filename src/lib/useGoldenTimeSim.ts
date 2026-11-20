@@ -465,6 +465,8 @@ export function useGoldenTimeSim() {
         // 차량 번호·초안 상태는 보내지 않는다 — 보내면 감독 에이전트가 검증·초안 에이전트를 불러 그 결과를 답에 섞음
         const context = [
           `시나리오: ${scenario.title}`,
+          // 막힘 원인을 함께 보내야 "시나리오 1 막힘 원인" 같은 질문에 문서 검색 없이도 맞게 답한다
+          ...(scenario.blockage ? [`이 시나리오에서 드론이 발견하는 전방 막힘 원인(시연 설정): ${scenario.blockage.label}`] : []),
           `경과: T+${formatClock(simTimeRef.current)}`,
           `드론 투입: ${launch ? plan.drones.map((d) => d.assignment.droneId).join(", ") : "없음"}`,
           `탐지 차량: ${violationsRef.current.length}대 (검증·통보 초안은 대시보드가 따로 처리 중)`,
