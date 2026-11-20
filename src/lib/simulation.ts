@@ -231,7 +231,9 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     scout.aheadSec = scout.times[scout.times.length - 1];
     const pts = scout.points;
     const ts = scout.times;
-    extend(pts, ts, road.tools.sub(road.fr[lastVertex], fB).slice(1).map(toLatLng), DRONE_SPEED_KMH);
+    // 차단 지점 25m 앞에서 멈춰 발견 — 앞을 비스듬히 보는 카메라 화면 위쪽에 사고 현장이 보이도록
+    const fStop = Math.max(road.fr[lastVertex], fB - 0.025 / road.tools.km);
+    extend(pts, ts, road.tools.sub(road.fr[lastVertex], fStop).slice(1).map(toLatLng), DRONE_SPEED_KMH);
     scout = finish(scout);
     const stay = routeAndTruck(sc, "base", true).truck;
     const det = routeAndTruck(sc, "detour", false).truck;
@@ -273,7 +275,7 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
         // 막힌 구간을 따라가며 길터주기 방송
         const r = route.road;
         const fB = r.tools.nearest([bl!.position.lat, bl!.position.lng], r.idx[bl!.segIndex]).f;
-        extend(d.points, d.times, r.tools.sub(fB, r.fr[bl!.segIndex + 1]).slice(1).map(toLatLng), SCAN_SPEED_KMH);
+        extend(d.points, d.times, r.tools.sub(Math.max(0, fB - 0.025 / r.tools.km), r.fr[bl!.segIndex + 1]).slice(1).map(toLatLng), SCAN_SPEED_KMH);
       }
       drones.push(finish(d));
       continue;
