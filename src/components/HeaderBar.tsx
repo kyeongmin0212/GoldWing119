@@ -3,7 +3,7 @@
 // 상황실 콘솔 상단: 시스템 바 · 사건 제어 · 요약 표
 
 import { useEffect, useState } from "react";
-import { ExternalLink, Pause, Play, RotateCcw } from "lucide-react";
+import { Pause, Play, RotateCcw } from "lucide-react";
 import { DRONE_BASES, DRONE_POOL_TOTAL } from "@/data/droneBases";
 import { SCENARIOS, SCENARIO_ORDER } from "@/data/scenarioData";
 import { formatClock } from "@/lib/geo";
@@ -66,13 +66,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
             )}
           </span>
           <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
-          <button
-            className="flex items-center gap-1 border border-white/60 px-2 py-0.5 hover:bg-white/10"
-            onClick={() => window.open("/crew", "gj-crew", "width=1180,height=820")}
-            title="같은 브라우저의 새 창에 소방차 태블릿 화면을 엽니다"
-          >
-            <ExternalLink size={13} /> 소방차 화면 열기
-          </button>
+          {/* 소방차 태블릿 화면(/crew)으로 가는 버튼은 뺌 — 같은 드론 영상이 이 화면 아래에 이미 보인다. 화면은 주소로 직접 열 수 있음 */}
         </div>
       </div>
 
