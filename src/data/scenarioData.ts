@@ -80,7 +80,7 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
     truckStart: { lat: 35.15194, lng: 126.90359 },
     truckRoute: [
       { to: { lat: 35.14505, lng: 126.91296 }, speedKmh: 25, label: "천변좌로 (양동~양림)", freeFlowKmh: 40 },
-      { to: { lat: 35.13529, lng: 126.9218 }, speedKmh: 20, label: "천변좌로 퇴근길 서행 (양림)", congested: true, freeFlowKmh: 40 },
+      { to: { lat: 35.13535, lng: 126.92175 }, speedKmh: 20, label: "천변좌로 퇴근길 서행 (양림 · 방림로 갈림길까지)", congested: true, freeFlowKmh: 40 },
       { to: { lat: 35.13164, lng: 126.92494 }, speedKmh: 15, label: "천변좌로 방림 구간 퇴근길 상습정체", congested: true, hotspotId: "H-CB", freeFlowKmh: 40 },
       { to: { lat: 35.13077, lng: 126.9203 }, speedKmh: 20, label: "천변좌로566번길 · 방림터널", freeFlowKmh: 30 },
       { to: { lat: 35.12754, lng: 126.9188 }, speedKmh: 18, label: "용대로 → 현장", freeFlowKmh: 30 },
@@ -95,11 +95,11 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
       blockedSpeedKmh: 4,
       detour: {
         fromSeg: 2,
-        via: [{ lat: 35.13404, lng: 126.91915 }],
+        via: [{ lat: 35.13331, lng: 126.91769 }], // 방림삼거리 (방림로가 용대로에 닿는 T자 교차로)
         summary: "천변좌로에서 방림로로 우회전 → 방림삼거리 → 용대로 → 현장",
         segments: [
-          { to: { lat: 35.13404, lng: 126.91915 }, speedKmh: 12, label: "방림로 (우회로)", freeFlowKmh: 30 },
-          { to: { lat: 35.1304, lng: 126.918 }, speedKmh: 12, label: "용대로 (우회로)", freeFlowKmh: 30 },
+          { to: { lat: 35.13331, lng: 126.91769 }, speedKmh: 12, label: "방림로 → 방림삼거리 (우회로)", freeFlowKmh: 30 },
+          { to: { lat: 35.1304, lng: 126.918 }, speedKmh: 12, label: "방림삼거리에서 좌회전 → 용대로 (우회로)", freeFlowKmh: 30 },
           { to: { lat: 35.12754, lng: 126.9188 }, speedKmh: 10, label: "용대로 → 현장 (우회로)", freeFlowKmh: 30 },
         ],
       },

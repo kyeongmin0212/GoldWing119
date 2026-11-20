@@ -22,6 +22,10 @@ async function osrm(pts) {
 
 const out = {};
 const detours = {};
+// OSRM 이 엉뚱하게 도는 우회로는 OSM 도로선을 직접 이어 roadGeometry.ts 에 넣고, 다시 생성해도 그대로 둔다.
+// regional: OSRM 이 천변좌로→방림로 우회전을 피해 천변좌로520번길→큰방림길로 되돌아감 → 방림로→방림삼거리→용대로 선을 손으로 이음
+const KEEP_DETOUR = new Set(["regional"]);
+const { DETOUR_GEOMETRY: OLD_DETOURS } = await import(pathToFileURL(path.join(root, "src/data/roadGeometry.ts")).href);
 for (const [mode, sc] of Object.entries(SCENARIOS)) {
   const ids = [];
   sc.truckRoute.forEach((s) => s.hotspotId && !ids.includes(s.hotspotId) && ids.push(s.hotspotId));
@@ -38,7 +42,10 @@ for (const [mode, sc] of Object.entries(SCENARIOS)) {
   console.log(mode, `${(d.routes[0].distance / 1000).toFixed(1)}km`, `${line.length}pts`, "| via", d.waypoints.map((w) => `${w.name || "?"}(${Math.round(w.distance)}m)`).join(" → "));
   await new Promise((res) => setTimeout(res, 1100));
   // 우회로: 갈림길 꼭짓점 → 우회 구간 끝점들
-  if (sc.blockage) {
+  if (sc.blockage && KEEP_DETOUR.has(mode) && OLD_DETOURS[mode]) {
+    detours[mode] = OLD_DETOURS[mode];
+    console.log(mode, "detour kept (OSM 도로선 직접 이음)", `${OLD_DETOURS[mode].distanceM}m`);
+  } else if (sc.blockage) {
     const { fromSeg, segments } = sc.blockage.detour;
     const j = fromSeg === 0 ? sc.truckStart : sc.truckRoute[fromSeg - 1].to;
     // 중간 구간 끝점은 지나게 강제하지 않는다(교차로에서 되돌아가는 우회 방지) — 경유는 via 로만 지정, 구간 경계는 선 위 가장 가까운 점으로 대응
@@ -58,6 +65,7 @@ import type { ScenarioMode } from "../types/drone.ts";
 export const ROAD_GEOMETRY: Record<ScenarioMode, { distanceM: number; line: [number, number][] }> = ${JSON.stringify(out)};
 
 /** 전방 차단 시 우회로 (갈림길 → 우회 구간 끝, 기존 경로에 다시 합류) */
+// 시나리오 1(regional) 우회로는 OSM 도로선을 직접 이은 것 — OSRM 은 천변좌로→방림로 우회전을 피해 골목(천변좌로520번길→큰방림길)으로 되돌아가서. fetch-roads 가 그대로 유지한다.
 export const DETOUR_GEOMETRY: Partial<Record<ScenarioMode, { distanceM: number; line: [number, number][] }>> = ${JSON.stringify(detours)};
 `;
 writeFileSync(path.join(root, "src/data/roadGeometry.ts"), ts, "utf8");
