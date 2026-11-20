@@ -58,7 +58,7 @@ export default function CrewPage() {
     bases: DRONE_BASES,
     status: snap?.status ?? "idle",
     simTime,
-    speed: snap?.speed ?? 30,
+    speed: snap?.speed ?? 10,
     violations: snap?.violations ?? [],
     focusDrone: focus ?? snap?.focusDrone ?? null,
     setFocusDrone: setFocus,
