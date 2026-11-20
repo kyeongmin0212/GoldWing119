@@ -313,7 +313,7 @@ export function pointOnTruckRoute(tl: TruckTimeline, ratio: number): LatLng {
   return pointAlong(tl.points, pathLengthKm(tl.points) * ratio);
 }
 
-/** 순항 54km/h(15m/s) — 도크 자동 출동 기체(DJI Dock 3 + Matrice 4D)는 Normal 모드만 지원, 상한 15m/s */
+/** 순항 54km/h(15m/s) — 도크 운용 기체(DJI Dock 3 + Matrice 4D, 원격 조종)는 Normal 모드만 지원, 상한 15m/s */
 export const DRONE_SPEED_KMH = 54;
 
 /** 간선도로 소통 등급 (서울시·국토부 기준: ≤15 정체, 15~25 서행, ≥25 원활) */

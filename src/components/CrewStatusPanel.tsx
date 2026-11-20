@@ -70,7 +70,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
               tone = "ok";
             } else text = `${where} 도착 — 정찰·탐지 중`;
             return (
-              <Row key={id} label={`드론 ${id}${sim.manualControl === id ? " (원격 수동 조종)" : ""}`} tone={tone}>
+              <Row key={id} label={`드론 ${id} · 원격 조종자 ${plan.drones.indexOf(d) + 1} 조종`} tone={tone}>
                 {text}
               </Row>
             );

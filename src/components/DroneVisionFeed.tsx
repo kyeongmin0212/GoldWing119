@@ -1,10 +1,10 @@
 "use client";
 
 // 선행 드론 실시간 영상(하향 카메라) 시뮬레이터 — 바운딩 박스, 번호판 OCR, 길터주기 방송 상태 (Canvas)
-// 상황실 콘솔(수동 조종 전환 버튼 있음)과 소방차 태블릿(보기 전용, 큰 글씨)이 같이 쓴다.
+// 상황실 콘솔과 소방차 태블릿(보기 전용, 큰 글씨)이 같이 쓴다. 드론은 상황실 원격 조종자(사람)가 조종한다.
 
 import { useEffect, useRef } from "react";
-import { Gamepad2, Video } from "lucide-react";
+import { UserRound, Video } from "lucide-react";
 import { formatClock, formatLatLng } from "@/lib/geo";
 import { droneAt, type DroneSim } from "@/lib/simulation";
 import type { SimView } from "@/lib/simView";
@@ -41,12 +41,9 @@ function drawCar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
 
 export default function DroneVisionFeed({
   sim,
-  onToggleManual,
   big = false,
 }: {
   sim: SimView;
-  /** 있으면 [수동 조종 전환] 버튼 표시 (상황실 콘솔) */
-  onToggleManual?: (droneId: string) => void;
   /** 소방차 태블릿용 큰 글씨 */
   big?: boolean;
 }) {
@@ -281,7 +278,7 @@ export default function DroneVisionFeed({
         ctx.fillStyle = "#e5e7eb";
         ctx.font = "bold 15px sans-serif";
         const msg =
-          st.phase === "standby" ? "드론 대기 — 출동 지령 대기 중" : st.phase === "nodrone" ? "드론 미투입 — 투입 불필요 판정" : "이륙 준비 중…";
+          st.phase === "standby" ? "드론 대기 — 출동 지령 대기 중" : st.phase === "nodrone" ? "드론 미투입 — 투입 불필요 판정" : "원격 조종자 이륙 준비 중";
         ctx.fillText(msg, W / 2, H / 2 - 4);
         ctx.font = "11px sans-serif";
         ctx.fillStyle = "#9ca3af";
@@ -290,7 +287,7 @@ export default function DroneVisionFeed({
             ? "혼잡 경로일 때만 1~2대 투입"
             : st.phase === "nodrone"
               ? "소방차 단독 출동 · 거점 드론 대기 유지"
-              : `이륙 예정 T+${formatClock((st.drone?.launchSec ?? 0) + 30)}`;
+              : `권장 이륙 시각 T+${formatClock((st.drone?.launchSec ?? 0) + 30)}`;
         ctx.fillText(sub, W / 2, H / 2 + 16);
         ctx.textAlign = "left";
       }
@@ -310,11 +307,11 @@ export default function DroneVisionFeed({
     : phase === "scan"
       ? { text: "정찰·탐지 중 (방송은 소방차 도착 3분 전부터)", cls: "bg-black/60 text-white" }
       : phase === "transit"
-        ? { text: "회피 경로로 비행 중", cls: "bg-black/60 text-white" }
+        ? { text: "원격 조종자가 권장 우회 경로로 비행 중", cls: "bg-black/60 text-white" }
         : phase === "prep"
-          ? { text: "이륙 준비", cls: "bg-black/60 text-white" }
+          ? { text: "원격 조종자 이륙 준비", cls: "bg-black/60 text-white" }
           : null;
-  const manual = !!drone && sim.manualControl === drone.assignment.droneId;
+  const pilotNo = drone ? plan.drones.indexOf(drone) + 1 : 0;
   const t = big ? "text-[16px]" : "text-[12px]";
 
   return (
@@ -363,15 +360,11 @@ export default function DroneVisionFeed({
             <b className="font-mono text-ok">{formatClock(drone.leadSec)}</b>
             <span className="text-muted"> 먼저</span>
           </span>
-          <span>
-            <span className="text-muted">비행 </span>
-            <b className={manual ? "text-fire" : "text-navy"}>{manual ? "수동 조종 (원격 조종자)" : "자동 비행 · 원격 조종자 감독"}</b>
+          <span className="ml-auto flex items-center gap-1">
+            <UserRound size={big ? 16 : 13} className="text-navy" />
+            <b className="text-navy">원격 조종자 {pilotNo} 조종 중</b>
+            <span className="text-muted">· 권장 경로 안내</span>
           </span>
-          {onToggleManual && phase !== "standby" && phase !== "nodrone" && (
-            <button className={`btn ml-auto h-7 px-2.5 text-[12px] ${manual ? "btn-primary" : ""}`} onClick={() => onToggleManual(drone.assignment.droneId)}>
-              <Gamepad2 size={14} /> {manual ? "자동 비행 복귀" : "수동 조종 전환"}
-            </button>
-          )}
         </div>
       )}
     </section>

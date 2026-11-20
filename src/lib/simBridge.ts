@@ -17,7 +17,6 @@ export interface SimSnapshot {
   speed: number;
   launch: boolean | null;
   focusDrone: string | null;
-  manualControl: string | null;
   violations: ViolationRecord[];
   recentLogs: { simTime: number; agent: AgentName; text: string }[];
   backend: "live" | "mock" | "unknown";

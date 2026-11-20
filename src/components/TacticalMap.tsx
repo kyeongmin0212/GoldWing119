@@ -262,7 +262,6 @@ export default function TacticalMap({ sim, compact = false }: { sim: SimView; co
                     <DroneIcon x={dp.x} y={dp.y} active={focus} />
                     <text x={dp.x + 17} y={dp.y - 6} fill={C.drone} fontSize={12 * fs} fontWeight={700} stroke="#fff" strokeWidth="3" paintOrder="stroke">
                       {d.assignment.droneId}
-                      {sim.manualControl === d.assignment.droneId ? " (수동)" : ""}
                     </text>
                     {simTime >= d.broadcastSec && (
                       <text x={dp.x + 17} y={dp.y + 9} fill={C.avoid} fontSize={10.5 * fs} fontWeight={600} stroke="#fff" strokeWidth="3" paintOrder="stroke">

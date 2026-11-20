@@ -26,7 +26,7 @@ export default function ConsolePage() {
         </section>
         <div className="flex min-h-0 flex-col gap-3">
           <div className="h-[300px] shrink-0 lg:h-[44%]">
-            <DroneVisionFeed sim={sim} onToggleManual={sim.toggleManual} />
+            <DroneVisionFeed sim={sim} />
           </div>
           <SidePanel sim={sim} />
         </div>

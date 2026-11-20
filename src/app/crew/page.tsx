@@ -1,7 +1,7 @@
 "use client";
 
 // 소방차 태블릿 화면 — 상황실 콘솔의 상태를 BroadcastChannel 로 실시간 공유받아 보기 전용으로 표시
-// 드론은 대원이 조종하지 않는다(거점 자동 비행 + 상황실 원격 조종자 감독). 대원은 영상과 전방 상황만 본다.
+// 드론은 상황실 원격 조종자(사람)가 조종한다. 대원은 조종하지 않고 영상과 전방 상황만 본다.
 
 import { useEffect, useMemo, useState } from "react";
 import CrewStatusPanel from "@/components/CrewStatusPanel";
@@ -62,7 +62,6 @@ export default function CrewPage() {
     speed: snap?.speed ?? 30,
     violations: snap?.violations ?? [],
     focusDrone: focus ?? snap?.focusDrone ?? null,
-    manualControl: snap?.manualControl ?? null,
     setFocusDrone: setFocus,
     setSelectedId: noop,
   };

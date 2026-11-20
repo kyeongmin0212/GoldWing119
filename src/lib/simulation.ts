@@ -4,7 +4,7 @@ import type { DispatchDecision, DroneAssignment, LatLng, NoFlyZone, Scenario } f
 import { DRONE_SPEED_KMH, buildTruckTimeline, distLatLng, planFlight, truckAt, type FlightPlan, type TruckTimeline } from "./geo.ts";
 
 export const SCAN_SPEED_KMH = 28; // 혼잡 구간 저속 정찰·방송 비행
-export const LAUNCH_PREP_SEC = 25; // 이륙 준비 (도크 자동 이륙 20~30초)
+export const LAUNCH_PREP_SEC = 25; // 이륙 준비 (원격 조종자가 도크에서 이륙시키는 데 20~30초)
 /** 길터주기 방송은 소방차 도착 이 시간 전부터 (그 전에는 탐지·신고에 집중) */
 export const BROADCAST_BEFORE_SEC = 180;
 /** 목표 선행 시간 — 소방차보다 이만큼 먼저 정찰 구간에 도착하도록 이륙 시각을 맞춘다(체공 배터리 절약) */

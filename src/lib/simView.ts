@@ -30,8 +30,6 @@ export interface SimView {
   speed: number;
   violations: ViolationRecord[];
   focusDrone: string | null;
-  /** 수동 조종 중인 드론 ID (없으면 자동 비행) */
-  manualControl: string | null;
   setFocusDrone: (id: string) => void;
   setSelectedId: (id: string | null) => void;
 }

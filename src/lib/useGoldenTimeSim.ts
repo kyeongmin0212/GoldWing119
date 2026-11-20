@@ -60,10 +60,6 @@ export function useGoldenTimeSim() {
   const [busyAgent, setBusyAgent] = useState<AgentName | null>(null);
   const backendRef = useRef<"live" | "mock" | "unknown">("unknown");
   const [focusDrone, setFocusDrone] = useState<string | null>(null);
-  /** 원격 조종자가 수동 조종 중인 드론 (없으면 자동 비행) */
-  const [manualControl, setManualControl] = useState<string | null>(null);
-  const manualRef = useRef<string | null>(null);
-  manualRef.current = manualControl;
 
   const threadRef = useRef<string | undefined>(undefined);
   const fallbackShown = useRef<string | null>(null);
@@ -176,11 +172,11 @@ export function useGoldenTimeSim() {
             addLog("route", `[${id}] 비행금지구역 DB 대조: 직선 경로가 '${f.blockedBy.join(", ")}' 침범 → 원천 배제`, "warn");
             addLog(
               "route",
-              `[${id}] A* 우회 경로 확정 ${f.plannedKm.toFixed(1)}km (+${(f.plannedKm - f.directKm).toFixed(1)}km, 꺾임점 ${f.path.length - 2}개, 안전거리 350m)`,
+              `[${id}] 권장 우회 경로 ${f.plannedKm.toFixed(1)}km 산출 (+${(f.plannedKm - f.directKm).toFixed(1)}km, 꺾임점 ${f.path.length - 2}개, 안전거리 350m) — 원격 조종자 화면에 표시`,
               "success",
             );
           } else {
-            addLog("route", `[${id}] 비행금지구역 침범 없음 — 직선 ${f.directKm.toFixed(1)}km 경로 확정`, "success");
+            addLog("route", `[${id}] 비행금지구역 침범 없음 — 직선 ${f.directKm.toFixed(1)}km 권장 경로를 원격 조종자에게 안내`, "success");
           }
           const ctr = CONTROL_ZONES.find((z) => pathEntersCircle(f.path, z.center, z.radiusKm));
           if (ctr) {
@@ -191,20 +187,20 @@ export function useGoldenTimeSim() {
           addLog(
             "pathfinder",
             d.launchSec > 0
-              ? `[${id}] 소방차보다 ${formatClock(d.leadSec)} 먼저 도착하도록 T+${formatClock(d.launchSec)} 이륙 예약 (체공 배터리 절약)`
-              : `[${id}] 즉시 이륙 — 예상 선행 ${formatClock(d.leadSec)}`,
+              ? `[${id}] 권장 이륙 시각 T+${formatClock(d.launchSec)} 안내 — 소방차보다 ${formatClock(d.leadSec)} 먼저 도착 (체공 배터리 절약)`
+              : `[${id}] 즉시 이륙 권장 — 예상 선행 ${formatClock(d.leadSec)}`,
             "info",
           );
         },
       });
       if (d.launchSec > 0)
-        ev.push({ id: `launch-${id}`, at: d.launchSec, run: () => addLog("pathfinder", `[${id}] 이륙 준비 — ${d.assignment.base.name}`, "info") });
+        ev.push({ id: `launch-${id}`, at: d.launchSec, run: () => addLog("pathfinder", `[${id}] 원격 조종자 이륙 준비 — ${d.assignment.base.name}`, "info") });
       ev.push({
         id: `arrive-${id}`,
         at: d.scanStartSec,
         run: () => {
           setFocusDrone(id);
-          addLog("pathfinder", `[${id}] '${d.assignment.cluster.label}' 도착 — 소방차보다 ${formatClock(d.leadSec)} 선행`, "success");
+          addLog("pathfinder", `[${id}] 원격 조종자가 '${d.assignment.cluster.label}' 도착 — 소방차보다 ${formatClock(d.leadSec)} 선행`, "success");
           if (d.assignment.role === "guide+detect") {
             addLog("vision", `[${id}] 비전 탐지 활성화 — 소방차 진입로 주정차 차량 스캔`, "info");
             addLog("vision", `[${id}] 개인정보 보호: 촬영 고지 송출, 얼굴 자동 블러, 번호판 OCR은 신고 전까지 최소 보관 (개인정보 보호법 제25조의2)`, "info");
@@ -260,7 +256,6 @@ export function useGoldenTimeSim() {
     setSelectedId(null);
     setBusyAgent(null);
     setFocusDrone(null);
-    setManualControl(null);
   }, []);
 
   /** [출동 시나리오 시작] → 투입 판단 카드 */
@@ -381,20 +376,6 @@ export function useGoldenTimeSim() {
     [scenario.title, launch, plan.drones, violations, addLog],
   );
 
-  /** 원격 조종자 수동 조종 전환/복귀 (시뮬레이션: 상태·기록만 바뀌고 경로는 그대로 표시) */
-  const toggleManual = useCallback(
-    (id: string) => {
-      const next = manualRef.current === id ? null : id;
-      setManualControl(next);
-      addLog(
-        "pathfinder",
-        next ? `[${id}] 원격 조종자 수동 조종 전환 — 자동 비행 일시 해제` : `[${id}] 자동 비행 복귀 — 계획 경로 재개`,
-        "warn",
-      );
-    },
-    [addLog],
-  );
-
   // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 16 / 출동 2"
   const activeDrones = launch ? plan.drones.length : 0;
 
@@ -407,7 +388,6 @@ export function useGoldenTimeSim() {
     speed,
     launch,
     focusDrone,
-    manualControl,
     violations,
     recentLogs: logs.slice(-8).map((l) => ({ simTime: l.simTime, agent: l.agent, text: l.text })),
     backend,
@@ -421,7 +401,7 @@ export function useGoldenTimeSim() {
   }, []);
   useEffect(() => {
     pub();
-  }, [pub, mode, status, speed, launch, focusDrone, manualControl, violations, logs, backend]);
+  }, [pub, mode, status, speed, launch, focusDrone, violations, logs, backend]);
   useEffect(() => {
     if (Date.now() - lastPubRef.current > 250) pub();
   }, [pub, simTime]);
@@ -453,8 +433,6 @@ export function useGoldenTimeSim() {
     activeDrones,
     focusDrone,
     setFocusDrone,
-    manualControl,
-    toggleManual,
     start,
     pause,
     reset,
