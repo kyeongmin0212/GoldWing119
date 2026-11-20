@@ -400,7 +400,6 @@ export default function DroneVisionFeed({
     };
   }, []);
 
-  const broadcasting = phase === "scan" && !!drone && simTime >= drone.broadcastSec;
   // 선행 정찰 드론: 정찰 구간을 지나 소방차 경로를 따라 전방 확인 → 차단 발견 → 우회로 확인
   const blk = plan.blockage && drone && drone.assignment.droneId === plan.blockage.droneId ? plan.blockage : null;
   const ahead = phase === "scan" && !!drone?.aheadSec && simTime >= drone.aheadSec;
@@ -422,11 +421,9 @@ export default function DroneVisionFeed({
           : { text: `전방 도로 막힘 확인 — ${blk.label} · 상황실 경로 판단 중`, cls: "bg-fire text-white" };
   const banner = scoutBanner
     ? scoutBanner
-    : broadcasting
-      ? { text: "길터주기 LED·음성 방송 중 — \"긴급차량 접근 중, 우측으로 양보 바랍니다\"", cls: "bg-fire text-white" }
-      : phase === "scan"
-        ? { text: "정찰·탐지 중 (방송은 소방차 도착 3분 전부터)", cls: "bg-black/60 text-white" }
-        : phase === "transit"
+    : phase === "scan"
+      ? { text: "소방차 경로 정찰·탐지 중", cls: "bg-black/60 text-white" }
+      : phase === "transit"
           ? { text: "원격 조종자가 권장 경로로 소방차 경로 합류 중", cls: "bg-black/60 text-white" }
           : phase === "prep"
             ? { text: "원격 조종자 이륙 준비", cls: "bg-black/60 text-white" }
