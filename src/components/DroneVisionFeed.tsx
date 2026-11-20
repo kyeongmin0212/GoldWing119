@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { UserRound, Video } from "lucide-react";
 import { LANE, ROAD_HALF, createAerialScene } from "@/lib/aerialScene";
 import { formatClock, formatLatLng, truckAt, type TruckTimeline } from "@/lib/geo";
-import type { ScenarioRoad } from "@/lib/road";
+import { scenarioRoute, type ScenarioRoad } from "@/lib/road";
 import { droneAt, type DroneSim } from "@/lib/simulation";
 import { maskPlate } from "@/lib/plate";
 import type { SimView } from "@/lib/simView";
@@ -25,6 +25,10 @@ interface FrameState {
   lockTarget: (ViolationSample & { record?: ViolationRecord }) | null;
   road: ScenarioRoad;
   roadPts: LatLng[];
+  /** 우회 승인 뒤: 기존 경로 선(되돌아가는 구간을 그리기 위해)과 갈림길까지 거리(m) */
+  basePts: LatLng[] | null;
+  baseCum: number[] | null;
+  junctionAlong: number | null;
   /** 도로 선 누적 거리(m) */
   cum: number[];
   truck: TruckTimeline;
@@ -156,6 +160,15 @@ export default function DroneVisionFeed({
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + meters(pts[i - 1], pts[i]));
     return { pts, cum };
   }, [road]);
+  const baseData = useMemo(() => {
+    const det = sim.scenario.blockage?.detour;
+    if (plan.route.variant !== "detour" || !det) return null;
+    const b = scenarioRoute(sim.scenario, "base").road;
+    const pts = b.line.map(([lat, lng]) => ({ lat, lng }));
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + meters(pts[i - 1], pts[i]));
+    return { pts, cum, junction: cum[b.idx[det.fromSeg]] };
+  }, [plan.route.variant, sim.scenario]);
   const myIds = new Set(myDet.map((d) => d.violationId));
 
   stateRef.current = {
@@ -165,6 +178,9 @@ export default function DroneVisionFeed({
     lockTarget,
     road,
     roadPts: roadData.pts,
+    basePts: baseData?.pts ?? null,
+    baseCum: baseData?.cum ?? null,
+    junctionAlong: baseData?.junction ?? null,
     cum: roadData.cum,
     truck: plan.truck,
     truckOn: status !== "idle" && status !== "awaiting",
@@ -181,6 +197,8 @@ export default function DroneVisionFeed({
     let raf = 0;
     let last = performance.now();
     let alongDisp = 0;
+    let turnDisp = 0;
+    let turnTarget = 0;
     let yieldAmt = 0;
     let zoom = 1;
     let scene = createAerialScene(3);
@@ -263,16 +281,30 @@ export default function DroneVisionFeed({
         scene = createAerialScene(sceneSeed);
         pathOf = null;
       }
-      // 영상 속 길을 지금 경로(우회 승인 뒤엔 우회로) 방향대로 — 경로가 바뀔 때만 다시 계산
-      if (pathOf !== st.cum) {
-        pathOf = st.cum;
-        scene.setPath({ wy0: 2000, step: PATH_STEP_M * UPM, theta: headingTable(st.roadPts, st.cum) });
+      // 우회 승인 뒤 드론이 갈림길까지 왔던 길로 되돌아가는 동안은 기존 경로 선을 쓰고(뒤돌아 비행), 갈림길에 닿으면 우회로 선으로
+      let R = { pts: st.roadPts, cum: st.cum };
+      if (st.basePts && st.baseCum && st.junctionAlong !== null && st.drone && (st.phase === "scan" || st.phase === "transit")) {
+        const b = alongRoad(droneAt(st.drone, st.simTime), st.basePts, st.baseCum);
+        if (b.dist < 25 && b.along > st.junctionAlong + 3) R = { pts: st.basePts, cum: st.baseCum };
+      }
+      // 영상 속 길을 지금 쓰는 경로 선 방향대로 — 선이 바뀔 때만 다시 계산
+      if (pathOf !== R.cum) {
+        pathOf = R.cum;
+        scene.setPath({ wy0: 2000, step: PATH_STEP_M * UPM, theta: headingTable(R.pts, R.cum) });
       }
 
       // 드론 위치 → 가상 장면 위치: 순항·정찰 모두 소방차 경로를 따라 실제로 간 거리로 (속도가 갑자기 바뀌지 않게)
       // 경로가 바뀌는 순간(우회 승인) 생기는 작은 차이는 부드럽게 따라간다
       const flying = st.phase === "transit" || st.phase === "scan";
-      const target = flying && st.drone ? alongRoad(droneAt(st.drone, st.simTime), st.roadPts, st.cum).along : 0;
+      const target = flying && st.drone ? alongRoad(droneAt(st.drone, st.simTime), R.pts, R.cum).along : 0;
+      // 진행 방향: 2초 뒤(시뮬레이션) 경로상 위치가 줄면 되돌아가는 중 → 카메라를 뒤로 돌린다
+      if (flying && st.drone) {
+        const ahead = alongRoad(droneAt(st.drone, st.simTime + 2), R.pts, R.cum).along;
+        if (ahead < target - 0.5) turnTarget = Math.PI;
+        else if (ahead > target + 0.5) turnTarget = 0;
+      } else turnTarget = 0;
+      const dTurn = turnTarget - turnDisp;
+      turnDisp += Math.sign(dTurn) * Math.min(Math.abs(dTurn), dt * 2.2);
       if (!flying || Math.abs(target - alongDisp) > 400) alongDisp = target;
       else alongDisp += (target - alongDisp) * Math.min(1, dt * 3);
       const droneAlong = alongDisp;
@@ -283,7 +315,7 @@ export default function DroneVisionFeed({
       const scanning = st.phase === "scan";
       /** 지금 경로(우회 승인 뒤엔 우회로) 위에 있는 지점만 장면에 둔다 — 40m 넘게 떨어지면 null */
       const onRoute = (p: LatLng): number | null => {
-        const r = alongRoad(p, st.roadPts, st.cum);
+        const r = alongRoad(p, R.pts, R.cum);
         return r.dist < 40 ? toWy(r.along) : null;
       };
       const blockAt = st.blockage ? onRoute(st.blockage.pos) : null;
@@ -292,7 +324,7 @@ export default function DroneVisionFeed({
       const keepClearWy = scanning
         ? [...parkedAt, st.blockage?.kind === "parking" ? blockAt : null].filter((x): x is number => x !== null)
         : [];
-      const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy });
+      const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy, turn: turnDisp });
       // 먼 곳은 옅은 안개 (기울인 카메라의 원근감)
       const haze = ctx.createLinearGradient(0, 0, 0, H * 0.32);
       haze.addColorStop(0, "rgba(214,219,226,0.62)");

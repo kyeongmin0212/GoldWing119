@@ -143,6 +143,8 @@ export interface AerialDrawOpts {
   blockWy?: number;
   /** 진로방해 차량 자리 — 이 근처 오른쪽 길가에는 다른 주차 차량을 두지 않는다 */
   keepClearWy?: number[];
+  /** 카메라가 길 방향에서 더 돌아간 각(라디안). 0 = 앞(길이 이어지는 쪽), π = 뒤돌아봄(왔던 길로 되돌아갈 때) */
+  turn?: number;
 }
 
 const SHOP_ROOF = ["#d9d6cf", "#c9ccd1", "#e4e0d6", "#b9bdc2", "#d3cbbd", "#cfc7b8"];
@@ -256,7 +258,7 @@ export function createAerialScene(seed = 1) {
    * 기울인 카메라(핀홀) 투영. zoom 1 = 정찰(낮게, 앞으로 약 46° 기울임), 0.55 = 순항(높게, 거의 바로 아래).
    * 화면 가운데(cy)에 드론 위치(s)가 오고, 화면 위쪽일수록 앞쪽 먼 곳이 작게 보인다.
    */
-  function makeView(W: number, H: number, s: number, zoom: number): AerialView {
+  function makeView(W: number, H: number, s: number, zoom: number, turn = 0): AerialView {
     const lowness = Math.max(0, Math.min(1, (zoom - 0.55) / 0.45)); // 0 순항 ~ 1 정찰
     const kc = (W / 340) * zoom * 2.3; // 화면 가운데 배율
     const theta = 1.18 - 0.44 * lowness; // 광축이 수평에서 내려간 각 (라디안): 순항 약 68°, 정찰 약 42°
@@ -269,7 +271,9 @@ export function createAerialScene(seed = 1) {
     const cy = H * 0.66; // 화면 가운데보다 조금 아래 — 앞쪽을 더 넓게 본다
     // 화면 가운데 지점과 카메라 방향 — 카메라는 조금 앞쪽 길 방향을 보며 돌아간다 (꺾이는 곳에서 미리 돈다)
     const [camX, camY] = path ? center(s) : [roadX(s + 25), s];
-    const camAngle = 0.75 * center(s + 30)[2] + 0.25 * center(s + 90)[2];
+    // 되돌아가는 중(turn > 90°)이면 뒤쪽 길 방향을 미리 본다
+    const back = Math.cos(turn) < 0 ? -1 : 1;
+    const camAngle = 0.75 * center(s + 30 * back)[2] + 0.25 * center(s + 90 * back)[2] + turn;
     const c = Math.cos(-camAngle);
     const sn = Math.sin(-camAngle);
     /** 도로 좌표 → (옆 l, 바로 아래 지점에서 앞으로 f) */
@@ -331,8 +335,14 @@ export function createAerialScene(seed = 1) {
     const rTop = (0 - cy) / F;
     const fTop = sinT + rTop * cosT > 0.02 ? fAtRow(0) : h * 12;
     const fBot = fAtRow(H);
-    const wyMin = s + (fBot - lookAhead) - 60;
-    const wyMax = s + (Math.min(fTop, h * 12) - lookAhead) + 60;
+    // 그릴 범위: 앞을 볼 때는 앞쪽, 뒤돌아볼 때는 뒤쪽, 도는 중간에는 양쪽 다
+    const fwdMin = s + (fBot - lookAhead) - 60;
+    const fwdMax = s + (Math.min(fTop, h * 12) - lookAhead) + 60;
+    const backMin = s - (Math.min(fTop, h * 12) - lookAhead) - 60;
+    const backMax = s - (fBot - lookAhead) + 60;
+    const ct = Math.cos(turn);
+    const wyMin = ct > 0.95 ? fwdMin : ct < -0.95 ? backMin : Math.min(fwdMin, backMin);
+    const wyMax = ct > 0.95 ? fwdMax : ct < -0.95 ? backMax : Math.max(fwdMax, backMax);
     const car: AerialView["car"] = (ctx, u, wy, extra, color, flip = 0, opt = {}) => {
       const [x0, y0] = M(u, wy);
       const [x1, y1] = M(u + 2 * Math.sin(extra), wy + 2 * Math.cos(extra));
@@ -373,7 +383,7 @@ export function createAerialScene(seed = 1) {
   }
 
   function draw(ctx: Ctx, W: number, H: number, o: AerialDrawOpts): AerialView {
-    const v = makeView(W, H, o.s, o.zoom);
+    const v = makeView(W, H, o.s, o.zoom, o.turn ?? 0);
     const { k, M } = v;
     const yLo = v.wyMin;
     const yHi = v.wyMax;
