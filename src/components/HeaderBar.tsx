@@ -50,6 +50,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
         </div>
         <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
         <div className="ml-auto flex items-center gap-3 text-[12px]">
+          <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
           <span
             className={`flex items-center gap-1.5 border px-1.5 py-0.5 ${backend === "offline" ? "border-amber-300 bg-amber-300/15 font-semibold text-amber-200" : "border-white/50"}`}
             title={backendTitle(backend, backendInfo)}
@@ -65,7 +66,6 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
               <span className="font-mono font-normal text-white/70">· 확인 {hms(backendInfo.checkedAt)}</span>
             )}
           </span>
-          <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
           {/* 소방차 태블릿 화면(/crew)으로 가는 버튼은 뺌 — 같은 드론 영상이 이 화면 아래에 이미 보인다. 화면은 주소로 직접 열 수 있음 */}
         </div>
       </div>
