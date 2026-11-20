@@ -20,7 +20,7 @@ type LMod = typeof import("leaflet");
 const C = {
   avoid: "#c8102e",
   control: "#b45309",
-  slow: "#d97706",
+  slow: "#eab308", // 노랑 — 소방차(#c2410c 주황 갈색)와 헷갈리지 않게
   jam: "#c8102e",
   road: "#6b7280",
   truck: "#c2410c",
@@ -303,17 +303,20 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
       {!compact && (
         <div className="pointer-events-none absolute left-12 top-2 z-[1000] space-y-1 border border-line bg-white/95 p-2 text-[11px] text-muted">
           <div className="flex items-center gap-2">
-            <span className="inline-block h-1 w-4 bg-fire" /> 정체 ≤15 <span className="ml-1 inline-block h-1 w-4 bg-amber-600" /> 서행 15~25 km/h
+            <span className="inline-block h-1 w-4 bg-fire" /> 정체 15 km/h 이하 <span className="ml-1 inline-block h-1 w-4 bg-yellow-500" /> 서행 15 초과~25 km/h 미만
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block h-0.5 w-4 bg-truck" /> 소방차 <span className="ml-1 inline-block h-0.5 w-4 bg-drone" /> 드론 (원격 조종자, 소방차 경로 따라 정찰)
+            <span className="inline-block h-0.5 w-4 bg-truck" /> 소방차 <span className="ml-1 inline-block h-0.5 w-4 bg-drone" /> 드론 정찰 경로 (원격 조종자가 소방차 앞길을 미리 확인)
           </div>
           {plan.blockage && (
             <div className="flex items-center gap-2">
-              <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-ok" /> 권장 우회로 (드론이 막힌 곳 발견 시)
+              <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-ok" /> 권장 우회로 (조종자가 막힌 곳을 확인하면 안내)
             </div>
           )}
-          <div className="text-faint">비행 제한 구역 반영은 추후 보완</div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full border border-dashed border-fire bg-fire/10" /> 혼잡 지점 반경 450 m (빨강 상습 정체 · 노랑 주정차 다발)
+          </div>
+          <div className="text-faint">비행 제한 구역은 아직 지도에 반영하지 않음 (추후 보완)</div>
         </div>
       )}
 
