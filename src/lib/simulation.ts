@@ -1,6 +1,7 @@
 // 시나리오 + 투입 결정 → 시뮬레이션 계획(소방차·드론 타임라인, 탐지 시각). 순수 함수.
 
 import type { DispatchDecision, DroneAssignment, LatLng, NoFlyZone, Scenario } from "../types/drone.ts";
+import { scenarioRoad } from "./road.ts";
 import { DRONE_SPEED_KMH, buildTruckTimeline, distLatLng, planFlight, truckAt, type FlightPlan, type TruckTimeline } from "./geo.ts";
 
 export const SCAN_SPEED_KMH = 28; // 혼잡 구간 저속 정찰·방송 비행
@@ -50,7 +51,8 @@ export function droneAt(d: Pick<DroneSim, "points" | "times" | "totalSec">, sec:
 }
 
 export function buildSimPlan(sc: Scenario, zones: NoFlyZone[], decision: DispatchDecision | null, launch: boolean): SimPlan {
-  const truck = buildTruckTimeline(sc.truckStart, sc.truckRoute);
+  // 소방차 시간은 실제 도로 거리(OSRM)로 계산
+  const truck = buildTruckTimeline(sc.truckStart, sc.truckRoute, scenarioRoad(sc).segKm);
   const drones: DroneSim[] = [];
 
   if (decision && launch) {

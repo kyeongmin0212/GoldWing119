@@ -14,7 +14,8 @@ import type {
   Scenario,
 } from "../types/drone.ts";
 import { isActive } from "../data/congestionDb.ts";
-import { ROAD_FACTOR, distLatLng, formatClock } from "./geo.ts";
+import { distLatLng, formatClock } from "./geo.ts";
+import { scenarioRoad } from "./road.ts";
 
 export const RUSH_HOURS: [number, number][] = [
   [7, 9],
@@ -29,12 +30,12 @@ export function freeFlow(s: RoadSegment): number {
 }
 
 export function routeTimes(sc: Scenario): { normalSec: number; expectedSec: number; segDelay: number[] } {
-  const pts = [sc.truckStart, ...sc.truckRoute.map((s) => s.to)];
+  const { segKm } = scenarioRoad(sc); // 구간별 실제 도로 거리
   let normalSec = 0;
   let expectedSec = 0;
   const segDelay: number[] = [];
   sc.truckRoute.forEach((s, i) => {
-    const d = distLatLng(pts[i], pts[i + 1]) * ROAD_FACTOR;
+    const d = segKm[i];
     const n = (d / freeFlow(s)) * 3600;
     const e = (d / s.speedKmh) * 3600;
     normalSec += n;

@@ -7,8 +7,8 @@
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
-import { ROAD_GEOMETRY } from "@/data/roadGeometry";
-import { distLatLng, formatClock, speedClass, truckAt } from "@/lib/geo";
+import { formatClock, speedClass, truckAt } from "@/lib/geo";
+import { scenarioRoad } from "@/lib/road";
 import { droneAt } from "@/lib/simulation";
 import type { SimView } from "@/lib/simView";
 import type { LatLng } from "@/types/drone";
@@ -28,38 +28,6 @@ const C = {
 };
 
 const ll = (p: LatLng): [number, number] => [p.lat, p.lng];
-type Pt = [number, number];
-const dKm = (a: Pt, b: Pt) => distLatLng({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] });
-
-/** 실제 도로 선 위에서 비율(0~1)로 위치·부분 선을 구하는 도구 */
-function roadTools(line: Pt[]) {
-  const cum = [0];
-  for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + dKm(line[i - 1], line[i]));
-  const total = cum[cum.length - 1] || 1;
-  const at = (f: number): Pt => {
-    const d = Math.max(0, Math.min(1, f)) * total;
-    let i = 1;
-    while (i < cum.length - 1 && cum[i] < d) i++;
-    const seg = cum[i] - cum[i - 1] || 1;
-    const t = (d - cum[i - 1]) / seg;
-    return [line[i - 1][0] + (line[i][0] - line[i - 1][0]) * t, line[i - 1][1] + (line[i][1] - line[i - 1][1]) * t];
-  };
-  const sub = (f1: number, f2: number): Pt[] => {
-    const a = Math.max(0, f1) * total;
-    const b = Math.min(1, f2) * total;
-    const out: Pt[] = [at(f1)];
-    for (let i = 0; i < line.length; i++) if (cum[i] > a && cum[i] < b) out.push(line[i]);
-    out.push(at(f2));
-    return out;
-  };
-  /** 점에서 가장 가까운 선 위 위치(비율). from 이후 인덱스에서만 찾아 순서를 지킨다 */
-  const nearest = (p: Pt, from = 0): { f: number; idx: number; pt: Pt } => {
-    let best = from;
-    for (let i = from; i < line.length; i++) if (dKm(line[i], p) < dKm(line[best], p)) best = i;
-    return { f: cum[best] / total, idx: best, pt: line[best] };
-  };
-  return { at, sub, nearest, total };
-}
 const label = (text: string, color: string, extra = "") =>
   `<span class="gjw-label" style="color:${color};${extra}">${text}</span>`;
 
@@ -94,21 +62,8 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
 
-  // 시나리오의 실제 도로 선과, 시뮬레이션 구간 경계(경유점)를 그 선 위 비율로 대응
-  const roadRef = useRef<{ mode: string; line: Pt[]; tools: ReturnType<typeof roadTools>; fr: number[] } | null>(null);
-  if (!roadRef.current || roadRef.current.mode !== sim.mode) {
-    const line = ROAD_GEOMETRY[sim.mode].line;
-    const tools = roadTools(line);
-    const fr: number[] = [0];
-    let idx = 0;
-    for (let v = 1; v < plan.truck.points.length - 1; v++) {
-      const n = tools.nearest(ll(plan.truck.points[v]), idx);
-      idx = n.idx;
-      fr.push(Math.max(fr[fr.length - 1], n.f));
-    }
-    fr.push(1);
-    roadRef.current = { mode: sim.mode, line, tools, fr };
-  }
+  // 시나리오의 실제 도로 선과 구간 경계 비율 — 시뮬레이션 시간 계산과 같은 공용 모듈(@/lib/road)
+  const road = scenarioRoad(scenario);
 
   // 1) 지도 만들기 (한 번)
   useEffect(() => {
@@ -207,7 +162,6 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     decision.clusters.forEach((c) => {
       for (let k = c.firstSeg; k <= c.lastSeg; k++) clusterSegs.add(k);
     });
-    const road = roadRef.current!;
     scenario.truckRoute.forEach((seg, k) => {
       const cls = speedClass(seg.speedKmh);
       const color = cls === "정체" ? C.jam : cls === "서행" ? C.slow : C.road;
@@ -252,7 +206,6 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     const started = status !== "idle";
 
     // 소방차
-    const road = roadRef.current!;
     const truck = truckAt(plan.truck, simTime);
     const k = truck.segIndex;
     const t0 = plan.truck.times[k];

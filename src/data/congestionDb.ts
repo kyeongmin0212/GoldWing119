@@ -28,7 +28,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-NG",
     name: "나주-광주 경계 국도1호선 진입 병목",
     kind: "상습정체",
-    position: { lat: 35.07, lng: 126.84 },
+    position: { lat: 35.06398, lng: 126.84213 },
     activeHours: RUSH,
     source: "가상 (실서비스: 국가교통정보센터 소통정보)",
   },
@@ -36,7 +36,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-HC",
     name: "효천지구 이면도로 불법주정차 다발",
     kind: "불법주정차다발",
-    position: { lat: 35.092, lng: 126.865 },
+    position: { lat: 35.10051, lng: 126.87109 },
     source: "가상 (실서비스: 안전신문고 신고 이력)",
   },
 ];

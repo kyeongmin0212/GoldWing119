@@ -2,16 +2,23 @@
 
 // 소방차 태블릿 오른쪽 — 운전 중 한눈에 보는 큰 글씨 상태판 (조작 버튼 없음)
 
-import { ROAD_FACTOR, distLatLng, formatClock, truckAt } from "@/lib/geo";
+import { formatClock, truckAt } from "@/lib/geo";
+import { scenarioRoad } from "@/lib/road";
 import type { SimView } from "@/lib/simView";
 
+/** 지금 소방차 위치에서 toVertex 경유점까지 남은 실제 도로 거리(km) */
 function remainKm(sim: SimView, toVertex: number): number {
-  const { plan, simTime } = sim;
+  const { plan, simTime, scenario } = sim;
+  const { segKm } = scenarioRoad(scenario);
   const t = truckAt(plan.truck, simTime);
-  if (t.segIndex + 1 > toVertex) return 0;
-  let km = distLatLng(t.pos, plan.truck.points[t.segIndex + 1]);
-  for (let k = t.segIndex + 1; k < toVertex; k++) km += distLatLng(plan.truck.points[k], plan.truck.points[k + 1]);
-  return km * ROAD_FACTOR;
+  const k = t.segIndex;
+  if (k + 1 > toVertex) return 0;
+  const t0 = plan.truck.times[k];
+  const t1 = plan.truck.times[k + 1] ?? t0;
+  const done = t1 > t0 ? Math.max(0, Math.min(1, (simTime - t0) / (t1 - t0))) : 1;
+  let km = segKm[k] * (1 - done);
+  for (let j = k + 1; j < toVertex; j++) km += segKm[j];
+  return km;
 }
 
 function Row({ label, children, tone }: { label: string; children: React.ReactNode; tone?: "fire" | "ok" | "drone" | "slow" }) {

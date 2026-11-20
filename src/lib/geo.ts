@@ -273,14 +273,15 @@ export interface TruckTimeline {
 /** 직선 대비 실제 도로 굴곡 보정 계수 */
 export const ROAD_FACTOR = 1.18;
 
-export function buildTruckTimeline(start: LatLng, segs: RoadSegment[]): TruckTimeline {
+/** segKm 이 있으면 구간별 실제 도로 거리(km)를 쓰고, 없으면 직선 × 굴곡 보정으로 어림한다 */
+export function buildTruckTimeline(start: LatLng, segs: RoadSegment[], segKm?: number[]): TruckTimeline {
   const points = [start];
   const times = [0];
   let t = 0;
   let km = 0;
   let prev = start;
-  for (const s of segs) {
-    const d = distLatLng(prev, s.to) * ROAD_FACTOR;
+  for (const [i, s] of segs.entries()) {
+    const d = segKm?.[i] ?? distLatLng(prev, s.to) * ROAD_FACTOR;
     t += (d / s.speedKmh) * 3600;
     km += d;
     points.push(s.to);
