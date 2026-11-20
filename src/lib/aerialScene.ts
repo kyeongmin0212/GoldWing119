@@ -274,17 +274,20 @@ export function createAerialScene(seed = 1) {
   function makeView(W: number, H: number, s: number, zoom: number, turn = 0, camAbs?: number): AerialView {
     // 카메라 방향을 직접 받으면, 그 지점 길 방향과의 차이를 turn 으로 본다 (그릴 범위 앞/뒤 판단용)
     if (camAbs !== undefined) turn = camAbs - center(s)[2];
-    const kc = (W / 340) * zoom * 2.3; // 화면 가운데 배율
+    // 화면 가운데 배율 — 영상 칸이 납작하면(노트북 화면) 높이 기준으로 줄여 카메라를 조금 높이 띄운다.
+    // 그래야 25m 앞 막힌 현장이 위쪽 안내 띠에 가리지 않고 화면 가운데 쪽에 온다
+    const kc = (Math.min(W, 1.3 * H) / 340) * zoom * 2.3;
     const theta = 0.74; // 광축이 수평에서 내려간 각 (라디안, 약 42°) — 순항 때도 바로 아래가 아니라 앞을 본다
     // 초점 거리(픽셀) — 너무 짧으면(광각) 길이 화면 위로 갈수록 V자로 급하게 좁아 보이고,
     // 너무 길면 앞이 덜 보여 25m 앞에 멈췄을 때 막힌 현장이 화면 위로 잘린다 → 그 사이 값
-    const F = 0.85 * W;
+    // 영상 칸이 납작하면(노트북 화면) 위아래로 덜 보이므로 높이에 맞춰 조금 넓게 본다
+    const F = Math.min(0.85 * W, 1.25 * H);
     const h = (F * Math.sin(theta)) / kc; // 카메라 높이(세계 단위)
     const cosT = Math.cos(theta);
     const sinT = Math.sin(theta);
     const lookAhead = h / Math.tan(theta); // 바로 아래 지점에서 화면 가운데 지점까지
     const cx = W / 2;
-    const cy = H * 0.78; // 드론 위치를 화면 아래쪽에 — 앞쪽을 넓게 본다 (정찰 때 앞 약 50m)
+    const cy = H * 0.8; // 드론 위치를 화면 아래쪽에 — 앞쪽을 넓게 본다 (정찰 때 앞 약 50m)
     // 화면 가운데 지점과 카메라 방향 — 카메라는 조금 앞쪽 길 방향을 보며 돌아간다 (꺾이는 곳에서 미리 돈다)
     const [camX, camY] = path ? center(s) : [roadX(s + 25), s];
     // 되돌아가는 중(turn > 90°)이면 뒤쪽 길 방향을 미리 본다

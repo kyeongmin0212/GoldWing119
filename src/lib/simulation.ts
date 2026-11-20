@@ -193,6 +193,47 @@ function trimAt(d: DroneSim, t: number): DroneSim {
   return { ...d, points, times, totalSec: t };
 }
 
+/** 도로 선 위에서 점 p 와 가장 가까운 위치(비율, f0~f1) — 꼭짓점이 아니라 선 위를 촘촘히 찾는다 */
+function fOnRoad(r: ScenarioRoute["road"], p: LatLng, f0 = 0, f1 = 1): number {
+  let best = f0;
+  let bestD = Infinity;
+  const scan = (a: number, b: number, n: number) => {
+    for (let k = 0; k <= n; k++) {
+      const f = a + ((b - a) * k) / n;
+      const dd = distLatLng(p, toLatLng(r.tools.at(f)));
+      if (dd < bestD) {
+        bestD = dd;
+        best = f;
+      }
+    }
+  };
+  scan(f0, f1, 400);
+  const w = (f1 - f0) / 400;
+  scan(Math.max(f0, best - w), Math.min(f1, best + w), 40);
+  return best;
+}
+
+/** 도로 선 위 길이(km) — f0 → f1 */
+function lineKm(r: ScenarioRoute["road"], f0: number, f1: number): number {
+  const s = r.tools.sub(f0, f1);
+  let km = 0;
+  for (let i = 1; i < s.length; i++) km += distLatLng(toLatLng(s[i - 1]), toLatLng(s[i]));
+  return km;
+}
+
+/** 도로를 따라 fEnd 에서 m 미터 뒤쪽(출발 쪽) 위치(비율). fMin 보다 앞으로는 가지 않는다 */
+function fBefore(r: ScenarioRoute["road"], fEnd: number, m: number, fMin: number): number {
+  if (lineKm(r, fMin, fEnd) * 1000 <= m) return fMin;
+  let lo = fMin;
+  let hi = fEnd;
+  for (let k = 0; k < 30; k++) {
+    const mid = (lo + hi) / 2;
+    if (lineKm(r, mid, fEnd) * 1000 > m) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 /**
  * 우회 승인 뒤: 지금 위치에서 왔던 길(기존 경로)을 따라 갈림길까지 되돌아간 다음, 우회로를 따라 합류 지점까지 앞서 확인.
  * 되돌아가는 동안과 우회로 모두 같은 속도로 멈춤 없이 난다 (건물 위로 가로지르지 않음).
@@ -201,17 +242,7 @@ function backtrackToDetour(d: DroneSim, base: ScenarioRoute, route: ScenarioRout
   const b = base.road;
   const here = d.points[d.points.length - 1];
   const fJ = b.fr[from];
-  // 기존 경로 위 지금 위치(비율) — 갈림길 뒤쪽에서 촘촘히 찾아 가장 가까운 곳
-  let fHere = fJ;
-  let best = Infinity;
-  for (let k = 0; k <= 400; k++) {
-    const f = fJ + ((1 - fJ) * k) / 400;
-    const dd = distLatLng(here, toLatLng(b.tools.at(f)));
-    if (dd < best) {
-      best = dd;
-      fHere = f;
-    }
-  }
+  const fHere = fOnRoad(b, here, fJ); // 기존 경로 위 지금 위치(갈림길 뒤쪽)
   const back = b.tools.sub(fJ, fHere).reverse(); // 지금 위치 → 갈림길
   extend(d.points, d.times, back.slice(1).map(toLatLng), SCAN_SPEED_KMH);
   const r = route.road;
@@ -240,13 +271,16 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
   let scout: DroneSim | null = null;
   let blockage: BlockageInfo | null = null;
   if (bl && inA) {
-    // 정찰 경로 위에서 막힌 지점에 가장 가까워지는 시각 = 발견 시각
+    // 발견 시각 = 정찰하며 막힌 지점 25m 앞(도로를 따라)에 닿는 때 — 거기서 멈추면 앞을 비스듬히 보는 카메라 화면에
+    // 막힌 현장 전체(꼬깔~굴착기·주차 차량)가 들어온다 (예전: 15m 안으로 다가가 현장이 화면 아래로 잘렸음)
     scout = planDrone(inA, pending.route, pending.truck);
+    const road = pending.route.road;
+    const stopPt = toLatLng(road.tools.at(fBefore(road, fOnRoad(road, bl.position), 25, 0)));
     let best = { s: scout.totalSec, d: Infinity };
-    for (let s = Math.floor(scout.scanStartSec); s <= Math.ceil(scout.totalSec); s++) {
-      const dd = distLatLng(droneAt(scout, s), bl.position);
+    for (let s = Math.floor(scout.scanStartSec); s <= Math.ceil(scout.totalSec); s += 0.25) {
+      const dd = distLatLng(droneAt(scout, s), stopPt);
       if (dd < best.d - 1e-6) best = { s, d: dd };
-      if (dd < 0.015) break;
+      if (dd < 0.002) break;
     }
     const stay = routeAndTruck(sc, "base", true).truck;
     const det = routeAndTruck(sc, "detour", false).truck;
@@ -269,12 +303,13 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     scout = planDrone(scoutA, pending.route, pending.truck);
     const road = pending.route.road;
     const lastVertex = scoutA.cluster.lastSeg + 1;
-    const fB = road.tools.nearest([bl.position.lat, bl.position.lng], road.idx[lastVertex]).f;
+    // 차단 지점의 도로 위 위치 — 가까운 꼭짓점이 아니라 선 위에서 정확히 (꼭짓점으로 어림하면 멈추는 거리가 10~15m 로 줄어 현장이 화면 아래로 잘렸음)
+    const fB = fOnRoad(road, bl.position, road.fr[lastVertex]);
     scout.aheadSec = scout.times[scout.times.length - 1];
     const pts = scout.points;
     const ts = scout.times;
-    // 차단 지점 25m 앞에서 멈춰 발견 — 앞을 비스듬히 보는 카메라 화면 위쪽에 막힌 현장이 보이도록
-    const fStop = Math.max(road.fr[lastVertex], fB - 0.025 / road.tools.km);
+    // 차단 지점 25m 앞(도로를 따라)에서 멈춰 발견 — 앞을 비스듬히 보는 카메라 화면 가운데~위쪽에 막힌 현장 전체(꼬깔~굴착기)가 보이도록
+    const fStop = fBefore(road, fB, 25, road.fr[lastVertex]);
     extend(pts, ts, road.tools.sub(road.fr[lastVertex], fStop).slice(1).map(toLatLng), DRONE_SPEED_KMH);
     scout = finish(scout);
     const stay = routeAndTruck(sc, "base", true).truck;
