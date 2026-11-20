@@ -107,8 +107,8 @@ function planDrone(a: DroneAssignment, route: ScenarioRoute, truck: TruckTimelin
   const fromStation = distLatLng(a.base.position, truck.points[0]) < 0.5;
   const flight: FlightPlan = fromStation
     ? (() => {
-        // 도로를 따라가되 골목 굽이는 펴서 난다 (도로에서 0.2km 안쪽으로 단순화)
-        const path = simplify([a.base.position, ...road.tools.sub(0, road.fr[first]).map(toLatLng)], 0.2);
+        // 소방차 출발점(소방서 앞 도로)에서 이륙해 소방차가 갈 도로를 따라 난다 (도로에서 30m 안쪽으로 단순화)
+        const path = simplify(road.tools.sub(0, road.fr[first]).map(toLatLng), 0.03);
         let km = 0;
         for (let i = 1; i < path.length; i++) km += distLatLng(path[i - 1], path[i]);
         return { path, directKm: distLatLng(a.base.position, entry), plannedKm: km, blockedBy: [], avoided: false };
