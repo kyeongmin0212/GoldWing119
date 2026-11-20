@@ -1,4 +1,4 @@
-// 검증: 투입 판단 규칙, 드론이 소방차 경로를 따라 정찰하는지, 선행 시간(3~5분), 탐지, 전방 차단·우회로 판단
+// 검증: 투입 판단 규칙, 드론이 소방차 경로를 따라 정찰하는지, 선행 시간(다른 소방서 드론 3~5분, 출동 소방서 드론 30초 이상), 탐지, 전방 차단·우회로 판단
 // (비행 제한 구역 반영은 추후 보완 — 지금은 검사하지 않음)
 import { SCENARIOS } from "../src/data/scenarioData.ts";
 import { HOTSPOTS } from "../src/data/congestionDb.ts";
@@ -72,7 +72,10 @@ function report(sc: Scenario, plan: SimPlan, label: string) {
   plan.drones.forEach((d, i) => {
     console.log(`  🚁 ${d.assignment.droneId} (${d.assignment.base.name}) → ${d.assignment.cluster.label} [${d.assignment.role}] 이륙 ${formatClock(d.launchSec)}`);
     console.log(`     정찰구간 도착 드론 ${formatClock(d.scanStartSec)} / 소방차 ${formatClock(d.truckEntrySec)} → 선행 ${formatClock(d.leadSec)}`);
-    if (d.leadSec < 180 || d.leadSec > 300) fail(`${label} ${d.assignment.droneId} 선행 시간 ${formatClock(d.leadSec)} 이 3~5분 범위 밖`);
+    // 출동 소방서 드론(소방차와 같은 곳에서 동시 출발)은 시연용으로 출발 직선을 짧게 잡아 선행이 1~2분 — 30초 이상 앞서면 통과(뒤처짐은 staysAhead 가 따로 검사)
+    const sameSite = distLatLng(d.assignment.base.position, plan.truck.points[0]) < 0.5;
+    if (sameSite ? d.leadSec < 30 || d.leadSec > 300 : d.leadSec < 180 || d.leadSec > 300)
+      fail(`${label} ${d.assignment.droneId} 선행 시간 ${formatClock(d.leadSec)} 이 ${sameSite ? "30초~5분" : "3~5분"} 범위 밖`);
     if (label !== "[우회]" && !followsRoad(plan, i)) fail(`${label} ${d.assignment.droneId} 정찰 궤적이 소방차 도로를 벗어남`);
     if (!transitOnRoad(plan, i)) fail(`${label} ${d.assignment.droneId} 정찰 구간까지 가는 길이 소방차 도로를 벗어남`);
     if (!staysAhead(plan, i)) fail(`${label} ${d.assignment.droneId} 출동 소방서 드론이 소방차 뒤로 처짐`);
