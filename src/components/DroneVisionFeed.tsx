@@ -1,6 +1,6 @@
 "use client";
 
-// 선행 드론 실시간 영상(앞으로 기울인 카메라, 정찰 고도 약 18m) 시뮬레이터 — 바운딩 박스, 번호판 OCR, 길터주기 방송 상태
+// 선행 드론 실시간 영상(앞으로 기울인 카메라, 정찰 고도 약 18m) 시뮬레이터 — 바운딩 박스, 번호판 OCR
 // 바탕은 코드로 그린 가상 동네 장면(굽은 길·골목·상가·주택, src/lib/aerialScene.ts) — 실제 영상·지도 아님, 인터넷 불필요.
 // 그 위에 시뮬레이션 위치에 맞춰 진로방해 차량·막힌 지점(사고/불법주차)·소방차를 그린다.
 // 위치는 "소방차 경로를 따라 드론에서 몇 m 앞/뒤인가"로 가상 장면에 옮긴다.
@@ -417,7 +417,7 @@ export default function DroneVisionFeed({
       : sim.routeChoice === "detour"
         ? { text: `우회로 선행 확인 중 — ${blk.summary}`, cls: "bg-emerald-700 text-white" }
         : sim.routeChoice === "stay"
-          ? { text: `막힌 구간 길터주기 방송 중 — ${blk.label}`, cls: "bg-fire text-white" }
+          ? { text: `기존 경로 유지 — ${blk.label}`, cls: "bg-fire text-white" }
           : { text: `전방 도로 막힘 확인 — ${blk.label} · 상황실 경로 판단 중`, cls: "bg-fire text-white" };
   const banner = scoutBanner
     ? scoutBanner

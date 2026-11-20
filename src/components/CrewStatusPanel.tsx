@@ -64,7 +64,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
         {blk && routeChoice === "stay" && (
           <Row label={blk.kind === "parking" ? "진입로 불법주차 · 기존 경로 유지" : "전방 도로 막힘 · 기존 경로 유지"} tone="slow">
             {blk.label}
-            <span className="block text-[17px] font-semibold text-text">{blk.kind === "parking" ? "주차 차량 사이로 서행 통과" : "드론 길터주기 방송으로 통과 유도"}</span>
+            <span className="block text-[17px] font-semibold text-text">{blk.kind === "parking" ? "주차 차량 사이로 서행 통과" : "막힌 구간 서행 통과"}</span>
           </Row>
         )}
         <Row label="현장 도착까지">{started ? `약 ${Math.ceil(remainSec / 60)}분 (T+${formatClock(plan.truck.totalSec)})` : "출동 대기"}</Row>
@@ -100,12 +100,9 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
                   : routeChoice === "detour"
                     ? "우회로를 앞서 비행하며 통행 확인 중"
                     : routeChoice === "stay"
-                      ? "전방 차단 구간 길터주기 방송 중"
+                      ? "막힌 구간 앞에서 정찰 중"
                       : "전방 차단 확인 — 상황실 판단 중";
               tone = simTime >= plan.blockage.atSec && !routeChoice ? "fire" : "drone";
-            } else if (simTime >= d.broadcastSec) {
-              text = `${where} 도착 — 길터주기 방송 중`;
-              tone = "ok";
             } else text = `${where} 도착 — 정찰·탐지 중`;
             return (
               <Row key={id} label={`드론 ${id} · 원격 조종자 ${plan.drones.indexOf(d) + 1} 조종`} tone={tone}>

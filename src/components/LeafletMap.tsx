@@ -221,9 +221,8 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
         }
         flown.push(ll(pos));
         const focus = simRef.current.focusDrone === id;
-        const broadcasting = simTime >= d.broadcastSec;
-        const key = `${focus}|${broadcasting}`;
-        const html = `<div style="position:relative">${DRONE_SVG(focus)}<span style="position:absolute;left:28px;top:-2px">${label(id, C.drone)}${broadcasting ? `<br>${label("길터주기 방송 중", C.avoid, "font-size:10.5px")}` : ""}</span></div>`;
+        const key = `${focus}`;
+        const html = `<div style="position:relative">${DRONE_SVG(focus)}<span style="position:absolute;left:28px;top:-2px">${label(id, C.drone)}</span></div>`;
         const cur = dyn.drones.get(id);
         if (!cur) {
           const marker = L.marker(ll(pos), { icon: icon(html, [26, 26], [13, 13]), zIndexOffset: 900 }).addTo(g);

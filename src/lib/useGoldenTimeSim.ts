@@ -199,11 +199,7 @@ export function useGoldenTimeSim() {
           }
         },
       });
-      ev.push({
-        id: `broadcast-${id}`,
-        at: d.broadcastSec,
-        run: () => addLog("pathfinder", `[${id}] 소방차 도착 3분 전 — LED·음성 송출: "긴급차량 접근 중, 우측으로 양보 바랍니다"`, "info"),
-      });
+
     }
     plan.route.segs.forEach((s, k) => {
       const inCluster = decision.clusters.some((c) => k >= c.firstSeg && k <= c.lastSeg);
@@ -285,14 +281,16 @@ export function useGoldenTimeSim() {
     addLog("route", `출동 경로 분석: 평시 ${formatClock(decision.normalSec)} → 예상 ${formatClock(decision.expectedSec)} (지연 ${formatClock(Math.max(0, decision.delaySec))})`, "info");
     const active = decision.matches.filter((m) => m.active);
     addLog("route", active.length ? `혼잡 DB 대조: 경로상 ${active.map((m) => m.hotspot.name).join(", ")}` : "혼잡 DB 대조: 경로상 활성 혼잡 구역 없음", active.length ? "warn" : "info");
+    // 시연: 투입 승인 단계 없이 권고대로 바로 출동 (승인 카드는 일단 뺌)
     addLog(
       "route",
       decision.recommend
-        ? `드론 투입 권고 ${decision.recommend}대 — 관제요원 승인 대기`
-        : "드론 투입 불필요 판단 — 관제요원 확인 대기",
+        ? `드론 투입 ${decision.recommend}대 — ${decision.assignments.map((a) => `${a.droneId}(${a.base.name})`).join(", ")} 소방차와 함께 출동`
+        : "드론 투입 불필요 판단 — 소방차만 출동",
       "progress",
     );
-    setStatus("awaiting");
+    setLaunch(decision.recommend > 0);
+    setStatus("running");
   }, [scenario, decision, addLog]);
 
   const start = useCallback(() => {
@@ -331,7 +329,7 @@ export function useGoldenTimeSim() {
         addLog("route", `소방차 경로 변경 — 현장 도착 예정 T+${formatClock(blk.detourArrivalSec)} (기존 유지 대비 ${formatClock(blk.savedSec)} 단축)`, "success");
         addLog("pathfinder", `[${blk.droneId}] 원격 조종자가 우회로를 앞서 비행하며 통행 가능 여부 확인`, "info");
       } else {
-        addLog("system", blk.kind === "parking" ? "관제요원 [기존 경로 유지] — 불법주차 차량 사이로 서행 통과 (필요하면 견인 지원 요청: 소방기본법 제25조제4항)" : "관제요원 [기존 경로 유지] — 막힌 구간은 드론 길터주기 방송으로 통과 유도", "info");
+        addLog("system", blk.kind === "parking" ? "관제요원 [기존 경로 유지] — 불법주차 차량 사이로 서행 통과 (필요하면 견인 지원 요청: 소방기본법 제25조제4항)" : "관제요원 [기존 경로 유지] — 막힌 구간 서행 통과", "info");
         addLog("route", `현장 도착 예정 T+${formatClock(blk.stayArrivalSec)}`, "info");
       }
       setRouteChoice(choice);

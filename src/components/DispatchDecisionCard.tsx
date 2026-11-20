@@ -19,7 +19,7 @@ export default function DispatchDecisionCard({ sim }: { sim: SimController }) {
       <div className="box-head">
         드론 투입 판단
         <span className="tag ml-auto text-muted">경로 탐색 에이전트 · 규칙 계산</span>
-        {!awaiting && <span className={`tag ${launch ? "text-drone" : "text-muted"}`}>{launch ? `투입 승인 (${n}대)` : "소방차만 출동"}</span>}
+        {!awaiting && <span className={`tag ${launch ? "text-drone" : "text-muted"}`}>{launch ? `드론 ${n}대 출동` : "소방차만 출동"}</span>}
       </div>
       <div className="p-3">
         <table className="kv">

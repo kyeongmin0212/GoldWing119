@@ -225,11 +225,6 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
                     <text x={dp.x + 17} y={dp.y - 6} fill={C.drone} fontSize={12 * fs} fontWeight={700} stroke="#fff" strokeWidth="3" paintOrder="stroke">
                       {d.assignment.droneId}
                     </text>
-                    {simTime >= d.broadcastSec && (
-                      <text x={dp.x + 17} y={dp.y + 9} fill={C.avoid} fontSize={10.5 * fs} fontWeight={600} stroke="#fff" strokeWidth="3" paintOrder="stroke">
-                        길터주기 방송 중
-                      </text>
-                    )}
                   </g>
                 )}
               </g>
