@@ -255,14 +255,14 @@ export function createAerialScene(seed = 1) {
   }
 
   /**
-   * 기울인 카메라(핀홀) 투영. zoom 1 = 정찰(낮게, 앞으로 약 46° 기울임), 0.55 = 순항(높게, 거의 바로 아래).
-   * 화면 가운데(cy)에 드론 위치(s)가 오고, 화면 위쪽일수록 앞쪽 먼 곳이 작게 보인다.
+   * 기울인 카메라(핀홀) 투영. 순항·정찰 모두 앞으로 기울인 같은 각도(수평에서 약 42° 아래)로 본다.
+   * zoom 1 = 정찰(낮게), 작을수록 높이 떠서 넓게 본다. 화면 가운데(cy)에 드론 위치(s)가 오고, 화면 위쪽일수록 앞쪽 먼 곳이 작게 보인다.
    */
   function makeView(W: number, H: number, s: number, zoom: number, turn = 0): AerialView {
-    const lowness = Math.max(0, Math.min(1, (zoom - 0.55) / 0.45)); // 0 순항 ~ 1 정찰
     const kc = (W / 340) * zoom * 2.3; // 화면 가운데 배율
-    const theta = 1.18 - 0.44 * lowness; // 광축이 수평에서 내려간 각 (라디안): 순항 약 68°, 정찰 약 42°
-    const F = 0.7 * W; // 초점 거리(픽셀)
+    const theta = 0.74; // 광축이 수평에서 내려간 각 (라디안, 약 42°) — 순항 때도 바로 아래가 아니라 앞을 본다
+    // 초점 거리(픽셀) — 너무 짧으면(광각) 길이 화면 위로 갈수록 V자로 급하게 좁아 보여서 조금 길게
+    const F = 1.0 * W;
     const h = (F * Math.sin(theta)) / kc; // 카메라 높이(세계 단위)
     const cosT = Math.cos(theta);
     const sinT = Math.sin(theta);

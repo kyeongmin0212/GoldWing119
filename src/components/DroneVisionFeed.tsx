@@ -309,7 +309,8 @@ export default function DroneVisionFeed({
       else alongDisp += (target - alongDisp) * Math.min(1, dt * 3);
       const droneAlong = alongDisp;
       const s = 2000 + droneAlong * UPM;
-      zoom += ((st.phase === "transit" ? 0.55 : 1) - zoom) * Math.min(1, dt * 3);
+      // 순항 때는 조금 높이(넓게), 정찰 때는 낮게 — 카메라 각도는 같음
+      zoom += ((st.phase === "transit" ? 0.8 : 1) - zoom) * Math.min(1, dt * 3);
       yieldAmt += ((st.yielding ? 1 : 0) - yieldAmt) * Math.min(1, dt * 1.5);
       const toWy = (alongM: number) => s + (alongM - droneAlong) * UPM;
       const scanning = st.phase === "scan";
