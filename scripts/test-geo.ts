@@ -20,13 +20,14 @@ function followsRoad(plan: SimPlan, droneIdx: number): boolean {
   return d.points.slice(startK).every((p) => line.some((q) => distLatLng(p, q) < 0.06));
 }
 
-/** 출동 소방서 드론은 이륙 직후(약 1분 반) 소방차를 앞질러 정찰 구간 도착까지 늘 소방차보다 앞(도로상 위치)에 있어야 한다 */
+/** 출동 소방서 드론은 소방차와 동시에 출발해 정찰 구간 도착까지 늘 소방차보다 앞(도로상 위치)에 있어야 한다 */
 function staysAhead(plan: SimPlan, droneIdx: number): boolean {
   const d = plan.drones[droneIdx];
   if (distLatLng(d.assignment.base.position, plan.truck.points[0]) >= 0.5) return true;
   const tools = plan.route.road.tools;
   let idx = 0;
-  for (let t = d.launchSec + 90; t <= d.scanStartSec; t += 15) { // 이륙 준비 25초 동안 먼저 출발한 소방차를 따라잡는 시간 제외
+  if (d.takeoffSec > 0.5) return false; // 동시 출발이어야 함
+  for (let t = d.takeoffSec + 15; t <= d.scanStartSec; t += 15) {
     const dp = droneAt(d, t);
     const tp = truckAt(plan.truck, t).pos;
     const fd = tools.nearest([dp.lat, dp.lng]).f;

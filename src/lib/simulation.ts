@@ -22,6 +22,8 @@ export interface DroneSim {
   totalSec: number;
   /** 이륙 준비 시작 시각 (즉시 이륙이면 0) */
   launchSec: number;
+  /** 실제로 날기 시작하는 시각 — 출동 소방서 드론은 소방차와 동시에 출발(준비 시간 없음) */
+  takeoffSec: number;
   /** 정찰(방송) 구간 도착 시각 */
   scanStartSec: number;
   /** 길터주기 LED·음성 방송 시작 시각 */
@@ -120,14 +122,15 @@ function planDrone(a: DroneAssignment, route: ScenarioRoute, truck: TruckTimelin
   if (fromStation) {
     // 소방차와 같이 출동(즉시 이륙)해 늘 소방차 앞에서 날도록, 정찰 구간에 TARGET_LEAD_SEC 먼저 닿는 속도로 순항 (최대 54km/h)
     launchSec = minLaunch;
-    const avail = truckEntrySec - TARGET_LEAD_SEC - LAUNCH_PREP_SEC - launchSec;
+    const avail = truckEntrySec - TARGET_LEAD_SEC - launchSec;
     if (avail > 0) cruise = Math.min(DRONE_SPEED_KMH, Math.max(20, (flight.plannedKm / avail) * 3600));
   } else {
     // 권장 이륙 시각: 소방차보다 TARGET_LEAD_SEC 먼저 도착하도록. 늦으면 즉시 이륙.
     const flightSec = (flight.plannedKm / DRONE_SPEED_KMH) * 3600;
     launchSec = Math.max(minLaunch, truckEntrySec - TARGET_LEAD_SEC - flightSec - LAUNCH_PREP_SEC);
   }
-  const takeoff = launchSec + LAUNCH_PREP_SEC;
+  // 출동 소방서 드론은 소방차와 동시에 출발 (도크에서 출동 지령과 함께 이륙), 다른 소방서 드론은 이륙 준비 시간
+  const takeoff = fromStation ? launchSec : launchSec + LAUNCH_PREP_SEC;
   const points = [flight.path[0], ...flight.path, ...scanPts.slice(1)];
   const speeds = [...flight.path.slice(1).map(() => cruise), ...scanPts.slice(1).map(() => SCAN_SPEED_KMH)];
   const times = [launchSec, ...timeline(points.slice(1), speeds, takeoff)];
@@ -139,6 +142,7 @@ function planDrone(a: DroneAssignment, route: ScenarioRoute, truck: TruckTimelin
     times,
     totalSec: times[times.length - 1],
     launchSec,
+    takeoffSec: takeoff,
     scanStartSec,
     broadcastSec: Math.max(scanStartSec, truckEntrySec - BROADCAST_BEFORE_SEC),
     truckEntrySec,

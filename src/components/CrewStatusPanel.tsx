@@ -91,7 +91,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
             const where = d.assignment.cluster.hotspots[0]?.name ?? d.assignment.cluster.label;
             let text: string;
             let tone: "fire" | "ok" | "drone" | undefined = "drone";
-            if (simTime < d.launchSec + 25) text = `이륙 대기 (T+${formatClock(d.launchSec + 25)} 이륙)`;
+            if (simTime < d.takeoffSec) text = `이륙 대기 (T+${formatClock(d.takeoffSec)} 이륙)`;
             else if (simTime < d.scanStartSec) text = `${where}로 비행 중 · 약 ${Math.ceil((d.scanStartSec - simTime) / 60)}분 뒤 도착`;
             else if (d.aheadSec && simTime >= d.aheadSec && plan.blockage) {
               text =

@@ -86,7 +86,7 @@ export default function DroneVisionFeed({
   let phase: Phase = "standby";
   if (status === "idle" || status === "awaiting") phase = "standby";
   else if (!launch || !drone) phase = "nodrone";
-  else if (simTime < drone.launchSec + 30) phase = "prep";
+  else if (simTime < drone.takeoffSec) phase = "prep";
   else if (simTime < drone.scanStartSec) phase = "transit";
   else phase = "scan";
 
@@ -386,7 +386,7 @@ export default function DroneVisionFeed({
             ? "혼잡 경로일 때만 1~2대 투입"
             : st.phase === "nodrone"
               ? "소방차 단독 출동 · 거점 드론 대기 유지"
-              : `권장 이륙 시각 T+${formatClock((st.drone?.launchSec ?? 0) + 30)}`;
+              : `권장 이륙 시각 T+${formatClock(st.drone?.takeoffSec ?? 0)}`;
         ctx.fillText(sub, W / 2, H / 2 + 16);
         ctx.textAlign = "left";
       }

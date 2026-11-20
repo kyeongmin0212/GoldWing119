@@ -180,7 +180,7 @@ export function useGoldenTimeSim() {
             "pathfinder",
             d.launchSec > 0
               ? `[${id}] 권장 이륙 시각 T+${formatClock(d.launchSec)} 안내 — 소방차보다 ${formatClock(d.leadSec)} 먼저 도착 (체공 배터리 절약)`
-              : `[${id}] 즉시 이륙 권장 — 예상 선행 ${formatClock(d.leadSec)}`,
+              : `[${id}] 소방차와 동시 출발 — 소방차가 갈 도로를 따라 앞서 비행, 예상 선행 ${formatClock(d.leadSec)}`,
             "info",
           );
         },
