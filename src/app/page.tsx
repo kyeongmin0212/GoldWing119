@@ -18,7 +18,7 @@ export default function ConsolePage() {
         <section className="box flex min-h-[420px] flex-col overflow-hidden">
           <div className="box-head">
             출동 상황도
-            <span className="ml-auto text-[11px] font-normal text-muted">지형·경계·구역은 개략/가상 (시연용)</span>
+            <span className="ml-auto text-[11px] font-normal text-muted">구역·지점은 개략/가상 (시연용) · 지도 OpenStreetMap</span>
           </div>
           <div className="relative min-h-0 flex-1">
             <TacticalMap sim={sim} />

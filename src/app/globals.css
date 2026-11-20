@@ -112,3 +112,20 @@ body {
 
 @keyframes dash { to { stroke-dashoffset: -24; } }
 .flow-dash { stroke-dasharray: 8 4; animation: dash 1.2s linear infinite; }
+
+/* 실제 지도(Leaflet) 위 표식 */
+.gjw-icon { background: none; border: none; }
+.gjw-label {
+  font: 700 11.5px var(--font-sans);
+  white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 3px #fff;
+}
+.leaflet-tooltip.gjw-zone-label {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #c8102e;
+  box-shadow: none;
+  color: #c8102e;
+  font: 700 11px var(--font-sans);
+  padding: 1px 5px;
+}
+.leaflet-container { font-family: var(--font-sans); background: #eef0f3; }
