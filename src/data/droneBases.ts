@@ -5,7 +5,7 @@
 import type { DroneBase } from "../types/drone.ts";
 
 export const DRONE_BASES: DroneBase[] = [
-  { id: "B-NS", name: "서부소방서 농성119안전센터 (가상 위치)", position: { lat: 35.15272, lng: 126.88119 }, capacity: 3 },
+  { id: "B-YD", name: "서부소방서 양동119안전센터 (가상 위치)", position: { lat: 35.152, lng: 126.903 }, capacity: 3 },
   { id: "B-DB", name: "동부소방서 (가상 위치)", position: { lat: 35.146, lng: 126.93 }, capacity: 3 },
   { id: "B-BB", name: "북부소방서 (가상 위치)", position: { lat: 35.205, lng: 126.895 }, capacity: 3 },
   { id: "B-DC", name: "남부소방서 대촌119안전센터 (가상 위치)", position: { lat: 35.07135, lng: 126.84483 }, capacity: 3 },
