@@ -21,6 +21,9 @@ function useNow() {
   return now;
 }
 
+/** ISO 시각 → "00:31:05" (30초마다 바뀌어 실제로 확인 중임이 보이게) */
+const hms = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
 function backendTitle(backend: SimController["backend"], info: SimController["backendInfo"]): string {
   const at = info.checkedAt ? ` (마지막 확인 ${new Date(info.checkedAt).toLocaleTimeString("ko-KR", { hour12: false })})` : "";
   if (backend === "live") return `IBM watsonx Orchestrate 에 실제로 요청해 응답을 확인함${at}`;
@@ -48,11 +51,19 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
         <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
         <div className="ml-auto flex items-center gap-3 text-[12px]">
           <span
-            className={`border px-1.5 py-0.5 ${backend === "offline" ? "border-amber-300 bg-amber-300/15 font-semibold text-amber-200" : "border-white/50"}`}
+            className={`flex items-center gap-1.5 border px-1.5 py-0.5 ${backend === "offline" ? "border-amber-300 bg-amber-300/15 font-semibold text-amber-200" : "border-white/50"}`}
             title={backendTitle(backend, backendInfo)}
           >
+            {/* 상태 점: 초록 = 실제 응답 확인, 노랑 = 끊김(시뮬레이션 대체), 회색 = 설정 없음·확인 중 */}
+            <span
+              aria-hidden
+              className={`inline-block h-2 w-2 rounded-full ${backend === "live" ? "bg-green-400" : backend === "offline" ? "animate-pulse bg-amber-300" : "bg-white/40"}`}
+            />
             watsonx Orchestrate{" "}
             {backend === "live" ? "연결됨" : backend === "offline" ? "연결 끊김 · 시뮬레이션으로 대체" : backend === "mock" ? "시뮬레이션" : "확인 중"}
+            {backendInfo.checkedAt && backend !== "mock" && backend !== "unknown" && (
+              <span className="font-mono font-normal text-white/70">· 확인 {hms(backendInfo.checkedAt)}</span>
+            )}
           </span>
           <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
           <button

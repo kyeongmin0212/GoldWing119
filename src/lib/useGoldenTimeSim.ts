@@ -117,7 +117,11 @@ export function useGoldenTimeSim() {
   // 연결 확인: 처음 한 번 + 30초마다 서버가 IBM 에 실제로 요청해 본 결과로 표시
   useEffect(() => {
     let alive = true;
-    const check = () =>
+    // 대시보드 서버 자체에 닿지 못한 경우(페이지 로딩·서버 재시작 중 등)는 한 번으로 판단하지 않고 3초 뒤 다시 확인,
+    // 두 번 연속 실패할 때만 끊김 표시 (IBM 쪽 실패는 서버가 이미 실제로 확인한 결과라 바로 표시)
+    let misses = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const check = (): Promise<void> =>
       fetch("/api/agent", { cache: "no-store" })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -125,11 +129,17 @@ export function useGoldenTimeSim() {
         })
         .then((d) => {
           if (!alive) return;
+          misses = 0;
           setBackend(d.mode);
           setBackendInfo({ checkedAt: d.checkedAt, reason: d.reason });
         })
         .catch((e) => {
           if (!alive) return;
+          misses += 1;
+          if (misses < 2) {
+            retry = setTimeout(check, 3000);
+            return;
+          }
           setBackend("offline");
           setBackendInfo({ checkedAt: new Date().toISOString(), reason: `대시보드 서버 응답 없음 (${e instanceof Error ? e.message : e})` });
         });
@@ -138,6 +148,7 @@ export function useGoldenTimeSim() {
     return () => {
       alive = false;
       clearInterval(t);
+      if (retry) clearTimeout(retry);
     };
   }, []);
 
