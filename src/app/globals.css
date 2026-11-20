@@ -1,84 +1,114 @@
 @import "tailwindcss";
 
+/* 공공 업무시스템 스타일 — 흰 바탕, 회색 구분선, 남색·소방 빨강 포인트 */
 @theme {
-  --color-ink-950: #070b12;
-  --color-ink-900: #0b111b;
-  --color-ink-850: #0f1724;
-  --color-ink-800: #141e2e;
-  --color-ink-700: #1d2a3e;
-  --color-ink-600: #2a3a52;
-  --color-ink-400: #6b7d96;
-  --color-ink-300: #93a3b8;
-  --color-ink-100: #dbe4ef;
-  --color-alert: #ff3b3b;
-  --color-drone: #22d3ee;
-  --color-truck: #fb923c;
-  --color-ok: #34d399;
-  --color-ibm: #4589ff;
-  --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, Consolas, monospace;
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-subtle: #f8f9fb;
+  --color-line: #d9dde3;
+  --color-line-strong: #b8bfca;
+  --color-text: #1d2433;
+  --color-muted: #5b6576;
+  --color-faint: #8a93a3;
+  --color-navy: #1f3a68;
+  --color-navy-dark: #172c50;
+  --color-navy-soft: #e8eef8;
+  --color-fire: #c8102e;
+  --color-fire-soft: #fdecee;
+  --color-slow: #b45309;
+  --color-slow-soft: #fdf3e6;
+  --color-ok: #2f7d32;
+  --color-ok-soft: #eaf5ea;
+  --color-drone: #1d4ed8;
+  --color-drone-soft: #e8efff;
+  --color-truck: #c2410c;
+  --font-sans: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  --font-mono: ui-monospace, Consolas, "D2Coding", monospace;
 }
 
 html,
 body {
   height: 100%;
-  background: var(--color-ink-950);
-  color: var(--color-ink-100);
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 body {
   font-family: var(--font-sans);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
 
-.panel {
-  background: var(--color-ink-900);
-  border: 1px solid var(--color-ink-700);
-  border-radius: 10px;
-}
-
-.panel-title {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-ink-300);
-}
-
-.scroll-thin::-webkit-scrollbar {
-  width: 6px;
-}
-.scroll-thin::-webkit-scrollbar-thumb {
-  background: var(--color-ink-600);
+.box {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
   border-radius: 3px;
 }
 
-@keyframes pulse-ring {
-  0% { r: 6; opacity: 0.9; }
-  100% { r: 22; opacity: 0; }
-}
-.pulse-ring {
-  animation: pulse-ring 1.6s ease-out infinite;
-}
-
-@keyframes dash {
-  to { stroke-dashoffset: -24; }
-}
-.flow-dash {
-  stroke-dasharray: 8 4;
-  animation: dash 0.8s linear infinite;
+.box-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-subtle);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
 }
 
-@keyframes blink {
-  50% { opacity: 0.35; }
-}
-.blink {
-  animation: blink 1s step-end infinite;
+/* 테두리형 상태 태그 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
-@keyframes slide-in {
-  from { transform: translateY(-6px); opacity: 0; }
-  to { transform: none; opacity: 1; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 3px;
+  background: var(--color-surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
 }
-.slide-in {
-  animation: slide-in 0.25s ease-out;
+.btn:hover { background: var(--color-subtle); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--color-navy); border-color: var(--color-navy); color: #fff; }
+.btn-primary:hover { background: var(--color-navy-dark); }
+.btn-fire { background: var(--color-fire); border-color: var(--color-fire); color: #fff; }
+.btn-fire:hover { background: #a50d26; }
+
+/* 라벨-값 표 */
+.kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+.kv th {
+  width: 92px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line);
+  background: var(--color-subtle);
+  color: var(--color-muted);
+  font-weight: 600;
+  text-align: left;
+  vertical-align: top;
 }
+.kv td { padding: 6px 8px; border: 1px solid var(--color-line); vertical-align: top; }
+
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #c9ced6; border-radius: 4px; }
+
+@keyframes dash { to { stroke-dashoffset: -24; } }
+.flow-dash { stroke-dasharray: 8 4; animation: dash 1.2s linear infinite; }

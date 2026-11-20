@@ -11,6 +11,7 @@ import { SCENARIOS } from "@/data/scenarioData";
 import { decideDispatch } from "@/lib/dispatch";
 import { formatClock, mapJurisdiction, pathEntersCircle } from "@/lib/geo";
 import { buildSimPlan } from "@/lib/simulation";
+import { publishSnapshot, type SimSnapshot } from "@/lib/simBridge";
 import type {
   AgentLog,
   AgentName,
@@ -59,6 +60,10 @@ export function useGoldenTimeSim() {
   const [busyAgent, setBusyAgent] = useState<AgentName | null>(null);
   const backendRef = useRef<"live" | "mock" | "unknown">("unknown");
   const [focusDrone, setFocusDrone] = useState<string | null>(null);
+  /** 원격 조종자가 수동 조종 중인 드론 (없으면 자동 비행) */
+  const [manualControl, setManualControl] = useState<string | null>(null);
+  const manualRef = useRef<string | null>(null);
+  manualRef.current = manualControl;
 
   const threadRef = useRef<string | undefined>(undefined);
   const fallbackShown = useRef<string | null>(null);
@@ -69,9 +74,9 @@ export function useGoldenTimeSim() {
   simTimeRef.current = simTime;
   backendRef.current = backend;
 
-  const addLog = useCallback((agent: AgentName, text: string, level: AgentLog["level"] = "info") => {
+  const addLog = useCallback((agent: AgentName, text: string, level: AgentLog["level"] = "info", sources?: string[]) => {
     logSeq.current += 1;
-    const entry: AgentLog = { id: `L${logSeq.current}`, agent, text, level, simTime: simTimeRef.current };
+    const entry: AgentLog = { id: `L${logSeq.current}`, agent, text, level, simTime: simTimeRef.current, sources };
     setLogs((l) => [...l.slice(-199), entry]);
   }, []);
 
@@ -133,7 +138,7 @@ export function useGoldenTimeSim() {
       setViolations((vs) => [...vs, rec]);
       setSelectedId(v.id);
       setFocusDrone(droneId);
-      addLog("vision", `🚨 [${droneId}] 진로 방해 차량 탐지 — ${v.plate}(가상) · ${v.reason} · 신뢰도 ${(v.confidence * 100).toFixed(0)}%`, "warn");
+      addLog("vision", `[${droneId}] 진로 방해 차량 탐지 — ${v.plate}(가상) · ${v.reason} · 신뢰도 ${(v.confidence * 100).toFixed(0)}%`, "warn");
       addLog("vision", `번호판 OCR "${v.plate}" → 탐지 JSON을 IBM 에이전트로 전달`, "info");
       try {
         setBusyAgent("report");
@@ -145,8 +150,8 @@ export function useGoldenTimeSim() {
         if (res.threadId) threadRef.current = res.threadId;
         noteFallback(res);
         if (!(await playSteps(res, gen))) return;
-        patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message });
-        addLog(res.mode === "live" ? "watsonx" : "report", res.message, "success");
+        patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message, sources: res.sources });
+        addLog(res.mode === "live" ? "watsonx" : "report", res.message, "success", res.sources);
       } catch (e) {
         setBusyAgent(null);
         patchViolation(v.id, { status: "error" });
@@ -199,7 +204,7 @@ export function useGoldenTimeSim() {
         at: d.scanStartSec,
         run: () => {
           setFocusDrone(id);
-          addLog("pathfinder", `🚁 [${id}] '${d.assignment.cluster.label}' 도착 — 소방차보다 ${formatClock(d.leadSec)} 선행`, "success");
+          addLog("pathfinder", `[${id}] '${d.assignment.cluster.label}' 도착 — 소방차보다 ${formatClock(d.leadSec)} 선행`, "success");
           if (d.assignment.role === "guide+detect") {
             addLog("vision", `[${id}] 비전 탐지 활성화 — 소방차 진입로 주정차 차량 스캔`, "info");
             addLog("vision", `[${id}] 개인정보 보호: 촬영 고지 송출, 얼굴 자동 블러, 번호판 OCR은 신고 전까지 최소 보관 (개인정보 보호법 제25조의2)`, "info");
@@ -215,7 +220,7 @@ export function useGoldenTimeSim() {
     scenario.truckRoute.forEach((s, k) => {
       const inCluster = decision.clusters.some((c) => k >= c.firstSeg && k <= c.lastSeg);
       if (!inCluster) return;
-      ev.push({ id: `truck-${k}`, at: plan.truck.times[k], run: () => addLog("system", `🚒 소방차 '${s.label}' 진입 (예상 ${s.speedKmh}km/h)`, "info") });
+      ev.push({ id: `truck-${k}`, at: plan.truck.times[k], run: () => addLog("system", `소방차 '${s.label}' 진입 (예상 ${s.speedKmh}km/h)`, "info") });
     });
     plan.detections.forEach((d) => {
       const v = scenario.violations.find((x) => x.id === d.violationId)!;
@@ -225,7 +230,7 @@ export function useGoldenTimeSim() {
       id: "truck-arrive",
       at: plan.truck.totalSec,
       run: () => {
-        addLog("system", `🚒 소방차 현장 도착 (T+${formatClock(plan.truck.totalSec)}) — 시나리오 종료`, "success");
+        addLog("system", `소방차 현장 도착 (T+${formatClock(plan.truck.totalSec)}) — 시나리오 종료`, "success");
         setStatus("finished");
       },
     });
@@ -255,12 +260,13 @@ export function useGoldenTimeSim() {
     setSelectedId(null);
     setBusyAgent(null);
     setFocusDrone(null);
+    setManualControl(null);
   }, []);
 
   /** [출동 시나리오 시작] → 투입 판단 카드 */
   const begin = useCallback(() => {
-    addLog("system", `📞 119 신고 접수 ${scenario.incident.reportedAt} — ${scenario.incident.name} · ${scenario.incident.type}`, "warn");
-    addLog("system", `🚒 ${scenario.station.name} 소방차 출동 지령`, "info");
+    addLog("system", `119 신고 접수 ${scenario.incident.reportedAt} — ${scenario.incident.name} · ${scenario.incident.type}`, "warn");
+    addLog("system", `${scenario.station.name} 소방차 출동 지령`, "info");
     const from = mapJurisdiction(scenario.station.position);
     const to = mapJurisdiction(scenario.incident.position);
     if (from.code.slice(0, 2) !== to.code.slice(0, 2))
@@ -295,7 +301,7 @@ export function useGoldenTimeSim() {
       const n = withDrones ? decision.recommend : 0;
       addLog(
         "system",
-        n ? `👤 관제요원 [드론 투입 승인] — ${decision.assignments.map((a) => `${a.droneId}(${a.base.name})`).join(", ")}` : "👤 관제요원 확인 — 소방차만 출동",
+        n ? `관제요원 [드론 투입 승인] — ${decision.assignments.map((a) => `${a.droneId}(${a.base.name})`).join(", ")}` : "관제요원 확인 — 소방차만 출동",
         "info",
       );
       setLaunch(withDrones && decision.recommend > 0);
@@ -320,7 +326,7 @@ export function useGoldenTimeSim() {
       if (!v || !v.draft || v.status !== "pending") return;
       const gen = genRef.current;
       patchViolation(id, { status: "submitting" });
-      addLog("system", `👤 관제요원 [신고 승인] — ${v.plate}`, "info");
+      addLog("system", `관제요원 [신고 승인] — ${v.plate}`, "info");
       try {
         setBusyAgent("report");
         const res = await callAgent({ type: "report_approved", violation: v, draft: v.draft, threadId: threadRef.current });
@@ -344,7 +350,7 @@ export function useGoldenTimeSim() {
       const v = violations.find((x) => x.id === id);
       if (!v) return;
       patchViolation(id, { status: "dismissed" });
-      addLog("system", `👤 관제요원 [무시] — ${v.plate} (신고하지 않음, 기록만 보존)`, "info");
+      addLog("system", `관제요원 [무시] — ${v.plate} (신고하지 않음, 기록만 보존)`, "info");
     },
     [violations, patchViolation, addLog],
   );
@@ -352,7 +358,7 @@ export function useGoldenTimeSim() {
   const chat = useCallback(
     async (message: string) => {
       const gen = genRef.current;
-      addLog("system", `👤 관제요원: ${message}`, "info");
+      addLog("system", `관제요원: ${message}`, "info");
       const context = [
         `시나리오: ${scenario.title}`,
         `경과: T+${formatClock(simTimeRef.current)}`,
@@ -366,17 +372,63 @@ export function useGoldenTimeSim() {
         setBackend(res.mode);
         if (res.threadId) threadRef.current = res.threadId;
         setBusyAgent(null);
-        addLog("watsonx", res.message, "success");
+        addLog("watsonx", res.message, "success", res.sources);
       } catch (e) {
         setBusyAgent(null);
-        addLog("system", `챗 오류: ${e instanceof Error ? e.message : e}`, "warn");
+        addLog("system", `질의 오류: ${e instanceof Error ? e.message : e}`, "warn");
       }
     },
     [scenario.title, launch, plan.drones, violations, addLog],
   );
 
-  // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 198 / 출동 2"
+  /** 원격 조종자 수동 조종 전환/복귀 (시뮬레이션: 상태·기록만 바뀌고 경로는 그대로 표시) */
+  const toggleManual = useCallback(
+    (id: string) => {
+      const next = manualRef.current === id ? null : id;
+      setManualControl(next);
+      addLog(
+        "pathfinder",
+        next ? `[${id}] 원격 조종자 수동 조종 전환 — 자동 비행 일시 해제` : `[${id}] 자동 비행 복귀 — 계획 경로 재개`,
+        "warn",
+      );
+    },
+    [addLog],
+  );
+
+  // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 16 / 출동 2"
   const activeDrones = launch ? plan.drones.length : 0;
+
+  // 소방차 태블릿으로 상태 공유: 상태가 바뀌면 즉시, 시간은 0.25초마다, 정지 중에도 1초마다 신호
+  const buildSnapshot = (): SimSnapshot => ({
+    sentAt: Date.now(),
+    mode,
+    status,
+    simTime: simTimeRef.current,
+    speed,
+    launch,
+    focusDrone,
+    manualControl,
+    violations,
+    recentLogs: logs.slice(-8).map((l) => ({ simTime: l.simTime, agent: l.agent, text: l.text })),
+    backend,
+  });
+  const snapRef = useRef(buildSnapshot);
+  snapRef.current = buildSnapshot;
+  const lastPubRef = useRef(0);
+  const pub = useCallback(() => {
+    publishSnapshot(snapRef.current());
+    lastPubRef.current = Date.now();
+  }, []);
+  useEffect(() => {
+    pub();
+  }, [pub, mode, status, speed, launch, focusDrone, manualControl, violations, logs, backend]);
+  useEffect(() => {
+    if (Date.now() - lastPubRef.current > 250) pub();
+  }, [pub, simTime]);
+  useEffect(() => {
+    const t = setInterval(pub, 1000);
+    return () => clearInterval(t);
+  }, [pub]);
 
   return {
     mode,
@@ -401,6 +453,8 @@ export function useGoldenTimeSim() {
     activeDrones,
     focusDrone,
     setFocusDrone,
+    manualControl,
+    toggleManual,
     start,
     pause,
     reset,

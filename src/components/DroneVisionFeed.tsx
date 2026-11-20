@@ -1,12 +1,13 @@
 "use client";
 
-// 선행 드론 FPV(하향 카메라) 시뮬레이터 — 바운딩 박스, 번호판 OCR, 길터주기 방송 상태 표시 (Canvas)
+// 선행 드론 실시간 영상(하향 카메라) 시뮬레이터 — 바운딩 박스, 번호판 OCR, 길터주기 방송 상태 (Canvas)
+// 상황실 콘솔(수동 조종 전환 버튼 있음)과 소방차 태블릿(보기 전용, 큰 글씨)이 같이 쓴다.
 
 import { useEffect, useRef } from "react";
-import { Video } from "lucide-react";
+import { Gamepad2, Video } from "lucide-react";
 import { formatClock, formatLatLng } from "@/lib/geo";
 import { droneAt, type DroneSim } from "@/lib/simulation";
-import type { SimController } from "@/lib/useGoldenTimeSim";
+import type { SimView } from "@/lib/simView";
 import type { ViolationRecord, ViolationSample } from "@/types/drone";
 
 type Phase = "standby" | "nodrone" | "prep" | "transit" | "scan";
@@ -38,7 +39,17 @@ function drawCar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
   ctx.fillRect(x + 3, y + h * 0.68, w - 6, h * 0.14);
 }
 
-export default function DroneVisionFeed({ sim }: { sim: SimController }) {
+export default function DroneVisionFeed({
+  sim,
+  onToggleManual,
+  big = false,
+}: {
+  sim: SimView;
+  /** 있으면 [수동 조종 전환] 버튼 표시 (상황실 콘솔) */
+  onToggleManual?: (droneId: string) => void;
+  /** 소방차 태블릿용 큰 글씨 */
+  big?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef<FrameState | null>(null);
@@ -186,8 +197,7 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
         const by = y - pad;
         const bw = carW * 1.05 + pad * 2;
         const bh = carH * 1.05 + pad * 2;
-        const pulse = 0.6 + 0.4 * Math.sin(now / 180);
-        ctx.strokeStyle = `rgba(255,59,59,${pulse})`;
+        ctx.strokeStyle = "rgba(255,59,59,0.95)";
         ctx.lineWidth = 2.5;
         ctx.strokeRect(bx, by, bw, bh);
         // 코너 브래킷
@@ -218,7 +228,7 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
         ctx.fillStyle = "#fecaca";
         ctx.fillText(`OCR ${(sample.confidence * 100).toFixed(0)}% · 가상 번호`, lx + 8, ly + 37);
         const stLabel =
-          record?.status === "submitted" ? "지자체 통보 완료" : record?.status === "pending" ? "신고 대기 (승인 필요)" : record?.status === "dismissed" ? "무시됨" : "에이전트 분석 중…";
+          record?.status === "submitted" ? "지자체 통보 완료" : record?.status === "pending" ? "통보 승인 대기" : record?.status === "dismissed" ? "무시됨" : "에이전트 작성 중";
         ctx.fillStyle = record?.status === "submitted" ? "#6ee7b7" : "#fde68a";
         ctx.fillText(stLabel, lx + 8, ly + 51);
       };
@@ -231,11 +241,9 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
       g.addColorStop(1, "rgba(0,0,0,0.65)");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "rgba(255,255,255,0.025)";
-      for (let y = (now / 40) % 4; y < H; y += 4) ctx.fillRect(0, y, W, 1);
 
       // HUD
-      ctx.strokeStyle = "rgba(34,211,238,0.7)";
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(W / 2 - 14, H / 2);
@@ -248,8 +256,8 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
       ctx.lineTo(W / 2, H / 2 + 14);
       ctx.stroke();
 
-      ctx.font = "11px ui-monospace, Consolas, monospace";
-      ctx.fillStyle = "rgba(165,243,252,0.9)";
+      ctx.font = "12px ui-monospace, Consolas, monospace";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
       const spd = st.phase === "transit" ? 54 : st.phase === "scan" ? (hovering ? 0 : 28) : 0;
       const alt = st.phase === "transit" ? 120 : st.phase === "scan" ? 45 : 0;
       ctx.fillText(`ALT ${alt}m  SPD ${spd}km/h`, 10, H - 28);
@@ -257,31 +265,31 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
         ctx.fillText(`GPS ${formatLatLng(droneAt(st.drone, st.simTime))}`, 10, H - 12);
       }
       if (st.phase !== "standby" && st.phase !== "nodrone") {
-        ctx.fillStyle = Math.floor(now / 600) % 2 ? "#ff3b3b" : "rgba(255,59,59,0.3)";
+        ctx.fillStyle = "#ef4444";
         ctx.beginPath();
-        ctx.arc(W - 46, 18, 4, 0, Math.PI * 2);
+        ctx.arc(W - 48, H - 16, 4, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "#fecaca";
-        ctx.fillText("REC", W - 38, 22);
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillText("REC", W - 40, H - 12);
       }
 
       // 대기/미투입 오버레이
       if (st.phase === "standby" || st.phase === "nodrone" || st.phase === "prep") {
-        ctx.fillStyle = "rgba(7,11,18,0.72)";
+        ctx.fillStyle = "rgba(17,20,26,0.82)";
         ctx.fillRect(0, 0, W, H);
         ctx.textAlign = "center";
-        ctx.fillStyle = "#93a3b8";
-        ctx.font = "bold 14px sans-serif";
+        ctx.fillStyle = "#e5e7eb";
+        ctx.font = "bold 15px sans-serif";
         const msg =
           st.phase === "standby" ? "드론 대기 — 출동 지령 대기 중" : st.phase === "nodrone" ? "드론 미투입 — 투입 불필요 판정" : "이륙 준비 중…";
         ctx.fillText(msg, W / 2, H / 2 - 4);
         ctx.font = "11px sans-serif";
-        ctx.fillStyle = "#6b7d96";
+        ctx.fillStyle = "#9ca3af";
         const sub =
           st.phase === "standby"
             ? "혼잡 경로일 때만 1~2대 투입"
             : st.phase === "nodrone"
-              ? "소방차 단독 출동 · 드론 풀 대기 유지"
+              ? "소방차 단독 출동 · 거점 드론 대기 유지"
               : `이륙 예정 T+${formatClock((st.drone?.launchSec ?? 0) + 30)}`;
         ctx.fillText(sub, W / 2, H / 2 + 16);
         ctx.textAlign = "left";
@@ -297,22 +305,28 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
   }, []);
 
   const broadcasting = phase === "scan" && !!drone && simTime >= drone.broadcastSec;
-  const banner =
-    broadcasting
-      ? { text: "[길터주기 LED·음성 경고 송출 중]", cls: "bg-alert/90 text-white blink" }
-      : phase === "scan"
-        ? { text: "정찰·탐지 중 — 방송은 소방차 도착 3분 전부터", cls: "bg-amber-500/20 text-amber-300" }
+  const banner = broadcasting
+    ? { text: "길터주기 LED·음성 방송 중 — \"긴급차량 접근 중, 우측으로 양보 바랍니다\"", cls: "bg-fire text-white" }
+    : phase === "scan"
+      ? { text: "정찰·탐지 중 (방송은 소방차 도착 3분 전부터)", cls: "bg-black/60 text-white" }
       : phase === "transit"
-        ? { text: "직선 비행 중 — 비행금지구역 회피 경로", cls: "bg-drone/20 text-drone" }
+        ? { text: "회피 경로로 비행 중", cls: "bg-black/60 text-white" }
         : phase === "prep"
-          ? { text: "이륙 준비", cls: "bg-ink-700 text-ink-300" }
+          ? { text: "이륙 준비", cls: "bg-black/60 text-white" }
           : null;
+  const manual = !!drone && sim.manualControl === drone.assignment.droneId;
+  const t = big ? "text-[16px]" : "text-[12px]";
 
   return (
-    <section className="panel flex min-h-[320px] flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-ink-700 px-3 py-2">
-        <Video size={14} className="text-drone" />
-        <span className="panel-title">선행 드론 FPV · 비전 탐지</span>
+    <section className="box flex h-full min-h-[260px] flex-col overflow-hidden">
+      <div className="box-head">
+        <Video size={15} className="text-navy" />
+        <span className={big ? "text-[18px]" : ""}>드론 실시간 영상{big ? " (상황실 공유)" : ""}</span>
+        {drone && launch && (
+          <span className="tag text-drone">
+            {drone.assignment.droneId} · {drone.assignment.role === "guide+detect" ? "유도+탐지" : "유도"}
+          </span>
+        )}
         <div className="ml-auto flex gap-1">
           {plan.drones.length > 1 &&
             launch &&
@@ -320,8 +334,8 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
               <button
                 key={d.assignment.droneId}
                 onClick={() => sim.setFocusDrone(d.assignment.droneId)}
-                className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
-                  drone?.assignment.droneId === d.assignment.droneId ? "bg-drone/25 text-drone" : "bg-ink-800 text-ink-400 hover:text-ink-100"
+                className={`border px-2 py-0.5 font-mono text-[11px] ${
+                  drone?.assignment.droneId === d.assignment.droneId ? "border-navy bg-navy text-white" : "border-line bg-white text-muted hover:bg-subtle"
                 }`}
               >
                 {d.assignment.droneId}
@@ -329,34 +343,35 @@ export default function DroneVisionFeed({ sim }: { sim: SimController }) {
             ))}
         </div>
       </div>
-      <div ref={wrapRef} className="relative min-h-0 flex-1">
-        <canvas ref={canvasRef} className="absolute inset-0" aria-label="드론 FPV 시뮬레이션 화면" />
-        {banner && (
-          <div className={`absolute left-2 right-2 top-2 rounded px-2 py-1 text-center text-[12px] font-bold ${banner.cls}`}>{banner.text}</div>
-        )}
+      <div ref={wrapRef} className="relative min-h-0 flex-1 bg-black">
+        <canvas ref={canvasRef} className="absolute inset-0" aria-label="드론 영상 시뮬레이션 화면" />
+        {banner && <div className={`absolute left-0 right-0 top-0 px-3 py-1.5 font-semibold ${t} ${banner.cls}`}>{banner.text}</div>}
         {drone && launch && phase === "scan" && (
-          <div className="absolute bottom-[68px] right-2 rounded bg-ink-950/70 px-1.5 py-0.5 text-[9.5px] text-ink-300">
-            촬영 고지 중 · 얼굴 블러 · OCR 최소 보관
-          </div>
-        )}
-        {drone && launch && (
-          <div className="absolute bottom-12 right-2 rounded bg-ink-950/70 px-1.5 py-0.5 font-mono text-[10px] text-drone">
-            CAM-1 · {drone.assignment.droneId} · {drone.assignment.role === "guide+detect" ? "유도+탐지" : "유도"}
+          <div className={`absolute bottom-9 right-2 bg-black/60 px-1.5 py-0.5 text-white/85 ${big ? "text-[13px]" : "text-[10.5px]"}`}>
+            촬영 고지 중 · 얼굴 자동 블러 · 번호판 인식 결과 최소 보관
           </div>
         )}
       </div>
       {drone && launch && (
-        <div className="grid grid-cols-2 gap-px border-t border-ink-700 bg-ink-700 text-[11px]">
-          <div className="bg-ink-900 px-2.5 py-1.5">
-            <div className="text-ink-400">담당 구간</div>
-            <div className="truncate text-ink-100" title={drone.assignment.cluster.label}>
-              {drone.assignment.cluster.label}
-            </div>
-          </div>
-          <div className="bg-ink-900 px-2.5 py-1.5">
-            <div className="text-ink-400">소방차 대비 선행</div>
-            <div className="font-mono text-ok">{formatClock(drone.leadSec)}</div>
-          </div>
+        <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-3 py-2 ${t}`}>
+          <span>
+            <span className="text-muted">담당 구간 </span>
+            <b>{drone.assignment.cluster.hotspots[0]?.name ?? drone.assignment.cluster.label}</b>
+          </span>
+          <span>
+            <span className="text-muted">소방차보다 </span>
+            <b className="font-mono text-ok">{formatClock(drone.leadSec)}</b>
+            <span className="text-muted"> 먼저</span>
+          </span>
+          <span>
+            <span className="text-muted">비행 </span>
+            <b className={manual ? "text-fire" : "text-navy"}>{manual ? "수동 조종 (원격 조종자)" : "자동 비행 · 원격 조종자 감독"}</b>
+          </span>
+          {onToggleManual && phase !== "standby" && phase !== "nodrone" && (
+            <button className={`btn ml-auto h-7 px-2.5 text-[12px] ${manual ? "btn-primary" : ""}`} onClick={() => onToggleManual(drone.assignment.droneId)}>
+              <Gamepad2 size={14} /> {manual ? "자동 비행 복귀" : "수동 조종 전환"}
+            </button>
+          )}
         </div>
       )}
     </section>

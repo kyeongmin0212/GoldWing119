@@ -11,6 +11,7 @@ export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResp
       fallbackReason,
       status: "pending",
       draft,
+      sources: ["관련 법령 조문 원문 발췌", "지자체 통보 양식과 작성 요령"],
       steps: [
         { agent: "vision", text: `[${req.violation.plate}] 탐지 이벤트 수신 (신뢰도 ${(req.violation.confidence * 100).toFixed(0)}%)`, delayMs: 600 },
         { agent: "report", text: `[${req.violation.plate}] ① 번호판 형식 검증 — 고시 형식 일치 (가상 번호)`, delayMs: 1200 },
@@ -36,17 +37,30 @@ export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResp
       message: `신고·견인 요청이 접수되었습니다(시뮬레이션). 접수번호 ${receiptNo}. 처분 결정은 관할 담당자가 합니다.`,
     };
   }
-  // chat
+  // chat — 지식 문서를 근거로 답하는 흉내 (LIVE 에서는 Orchestrate 지식 RAG 가 실제로 답함)
   const q = req.message;
   let answer = "문서에서 확인할 수 없음 — 담당자 확인이 필요합니다.";
-  if (/금지|공항|회피/.test(q)) answer = "회피구역(활주로 진입·이륙 회랑, 송전선로, 군사시설) DB와 직선 경로를 대조해 겹치면 안전거리 350m를 두고 우회 경로를 계산합니다. 광주공항 관제권(9.3km)은 금지가 아니라 승인 대상이고 긴급비행 특례도 승인을 면제하지 않습니다. 관제기관과 사전 협의된 경우 사전 통보 시 승인 간주(항공안전법 제127조④, 시행규칙 제308조⑧)되며, 비행 후 승인신청서를 냅니다.";
-  else if (/소화전|5m|5 m/.test(q)) answer = "도로교통법 제32조에 따라 소방용수시설 5m 이내는 정차·주차 금지 구역입니다(공개 법령 요약). 실제 처분 여부는 관할 지자체가 판단합니다.";
-  else if (/과태료|견인|불법|위반이야|처벌/.test(q)) answer = "위반 확정이나 과태료·견인 결정은 제가 하지 않습니다. 증거와 초안을 정리해 드리고, 최종 판단은 관할 담당자가 합니다.";
-  else if (/도착|ETA|몇 분/.test(q)) answer = "현재 시나리오 기준 드론은 소방차보다 정체 구간에 먼저 도착합니다(지도 우측 하단 ETA 비교 참고, 시뮬레이션 가정값).";
+  let sources: string[] = [];
+  if (/과태료|벌금|얼마/.test(q)) {
+    answer = "과태료 금액이나 부과 여부는 제가 판단하지 않습니다. 증거와 통보 초안을 정리해 드리고, 최종 판단은 관할 지자체 담당자가 합니다.";
+  } else if (/견인/.test(q)) {
+    answer = "소방기본법 제25조제4항: 소방활동에 방해가 되는 주정차 차량의 제거·이동을 위해 관할 지자체 등에 견인차량과 인력 지원을 요청할 수 있고, 요청받은 기관은 정당한 사유가 없으면 협조해야 합니다. 요청 여부는 현장 지휘관이 판단합니다.";
+    sources = ["관련 법령 조문 원문 발췌"];
+  } else if (/관제권|비행|드론|공항|회피|금지/.test(q)) {
+    answer = "관제권(광주공항 반경 9.3km)은 회피구역이 아니라 비행승인 대상입니다. 화재 대응 긴급 비행은 항공안전법 제131조의2제2항에 해당하고, 사전에 국토교통부장관에게 알리면 비행승인을 받은 것으로 봅니다(제127조제4항). 활주로 회랑·송전선로·군사시설은 경로에서 빼고 우회합니다.";
+    sources = ["관련 법령 조문 원문 발췌", "드론 선행 출동 운용 절차서"];
+  } else if (/소화전|5m|5 m|주정차|주차/.test(q)) {
+    answer = "도로교통법 제32조제6호: 소방용수시설 또는 비상소화장치가 설치된 곳으로부터 5미터 이내에는 정차·주차할 수 없습니다. 실제 처분 여부는 관할 지자체가 판단합니다.";
+    sources = ["관련 법령 조문 원문 발췌"];
+  } else if (/도착|몇 분|ETA/.test(q)) {
+    answer = "드론은 소방차보다 약 4분 먼저 혼잡 구간에 도착하도록 이륙 시각을 맞춥니다(시뮬레이션 가정값).";
+    sources = ["드론 선행 출동 운용 절차서"];
+  }
   return {
     mode: "mock",
     fallbackReason,
-    steps: [{ agent: "watsonx", text: "질의 처리 중 (MOCK)", delayMs: 700 }],
+    sources,
+    steps: [{ agent: "watsonx", text: "질의 처리 중 (시뮬레이션)", delayMs: 700 }],
     message: answer,
   };
 }

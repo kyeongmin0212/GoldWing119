@@ -1,111 +1,113 @@
 "use client";
 
-import { Pause, Play, RotateCcw, Radio, Building2, Map as MapIcon, Moon, Gauge } from "lucide-react";
-import { DRONE_BASES, DRONE_POOL_TOTAL, STAGE3_TARGET } from "@/data/droneBases";
+// 상황실 콘솔 상단: 시스템 바 · 사건 제어 · 요약 표
+
+import { useEffect, useState } from "react";
+import { ExternalLink, Pause, Play, RotateCcw } from "lucide-react";
+import { DRONE_BASES, DRONE_POOL_TOTAL } from "@/data/droneBases";
 import { SCENARIOS, SCENARIO_ORDER } from "@/data/scenarioData";
 import { formatClock } from "@/lib/geo";
 import type { SimController } from "@/lib/useGoldenTimeSim";
 
+const MODE_LABEL = { urban: "도심 · 출근시간", regional: "광역 · 퇴근시간", night: "야간 · 한산" } as const;
+
+function useNow() {
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
 export default function HeaderBar({ sim }: { sim: SimController }) {
-  const { status, mode, backend, activeDrones, simTime, speed } = sim;
+  const { status, mode, backend, activeDrones, simTime, speed, scenario, violations, plan, launch } = sim;
+  const now = useNow();
   const running = status === "running";
+  const pending = violations.filter((v) => v.status === "pending" || v.status === "analyzing").length;
 
   return (
-    <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-ink-700 bg-ink-900/80 px-4 py-2.5 backdrop-blur">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <div className="grid h-8 w-8 place-items-center rounded-md bg-alert/15 text-alert">
-          <Radio size={18} />
+    <header>
+      {/* 시스템 바 */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-navy px-4 py-2 text-white">
+        <div className="flex items-baseline gap-2">
+          <b className="text-[16px] tracking-tight">G-J 골든타임 윙</b>
+          <span className="text-[13px] text-white/75">긴급출동 선행 드론 관제</span>
         </div>
-        <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-bold tracking-tight">
-            G-J 골든타임 윙 <span className="font-normal text-ink-300">— 전남·광주 광역 드론 관제 시스템</span>
-          </h1>
-          <p className="text-[11px] text-ink-400">{sim.scenario.title}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 rounded-md border border-ink-700 bg-ink-850 px-3 py-1.5 text-[12px]">
-        <span className="text-ink-300">시범 {DRONE_BASES.length}거점 · 드론</span>
-        <b className="font-mono">{DRONE_POOL_TOTAL}대</b>
-        <span className="text-ok">대기 {DRONE_POOL_TOTAL - activeDrones}</span>
-        <span className="text-ink-600">/</span>
-        <span className="text-alert">출동 {activeDrones}</span>
-        <span className="hidden text-[10px] text-ink-400 xl:inline" title="3단계 광역 통합 목표 — 공식 출처 없는 가정값">
-          · 3단계 목표 {STAGE3_TARGET}대(가정)
-        </span>
-      </div>
-
-      <div
-        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold ${
-          backend === "live" ? "bg-ibm/20 text-ibm" : "bg-ink-700 text-ink-300"
-        }`}
-        title={backend === "live" ? "IBM watsonx Orchestrate 실연동" : "내장 시뮬레이션 에이전트 (IBM 연결 정보 미설정 또는 오류)"}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${backend === "live" ? "bg-ibm" : "bg-ink-400"}`} />
-        watsonx Orchestrate · {backend === "live" ? "LIVE" : backend === "mock" ? "MOCK" : "확인 중"}
-      </div>
-
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        <div className="font-mono text-[13px] tabular-nums text-ink-100" aria-label="시뮬레이션 경과 시간">
-          T+{formatClock(simTime)}
-        </div>
-
-        <button
-          onClick={running ? sim.pause : sim.start}
-          disabled={status === "awaiting"}
-          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-            running ? "bg-ink-700 hover:bg-ink-600" : "bg-alert text-white hover:brightness-110"
-          }`}
-        >
-          {running ? <Pause size={15} /> : <Play size={15} />}
-          {running
-            ? "일시정지"
-            : status === "awaiting"
-              ? "투입 판단 대기"
-              : status === "paused"
-                ? "재개"
-                : status === "finished"
-                  ? "다시 시작"
-                  : "출동 시나리오 시작"}
-        </button>
-        <button
-          onClick={sim.reset}
-          className="flex items-center gap-1.5 rounded-md bg-ink-800 px-3 py-1.5 text-[13px] hover:bg-ink-700"
-        >
-          <RotateCcw size={14} /> 초기화
-        </button>
-
-        <div className="flex overflow-hidden rounded-md border border-ink-700 text-[12px]" role="group" aria-label="시나리오 모드 전환">
-          {SCENARIO_ORDER.map((m) => {
-            const Icon = m === "urban" ? Building2 : m === "regional" ? MapIcon : Moon;
-            return (
-              <button
-                key={m}
-                onClick={() => sim.changeMode(m)}
-                title={SCENARIOS[m].description}
-                className={`flex items-center gap-1 px-2.5 py-1.5 ${mode === m ? "bg-drone/20 text-drone" : "hover:bg-ink-800"}`}
-              >
-                <Icon size={13} /> {m === "urban" ? "광주 도심형" : m === "regional" ? "전남-광주 광역형" : "평시 야간"}
-              </button>
-            );
-          })}
-        </div>
-
-        <label className="flex items-center gap-1 text-[12px] text-ink-300">
-          <Gauge size={13} />
-          <select
-            value={speed}
-            onChange={(e) => sim.setSpeed(Number(e.target.value))}
-            className="rounded bg-ink-800 px-1.5 py-1 text-ink-100 outline-none"
-            aria-label="재생 배속"
+        <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
+        <div className="ml-auto flex items-center gap-3 text-[12px]">
+          <span className="border border-white/50 px-1.5 py-0.5" title={backend === "live" ? "IBM watsonx Orchestrate 실연동" : "내장 시뮬레이션 에이전트"}>
+            watsonx Orchestrate {backend === "live" ? "연결됨" : backend === "mock" ? "시뮬레이션" : "확인 중"}
+          </span>
+          <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
+          <button
+            className="flex items-center gap-1 border border-white/60 px-2 py-0.5 hover:bg-white/10"
+            onClick={() => window.open("/crew", "gj-crew", "width=1180,height=820")}
+            title="같은 브라우저의 새 창에 소방차 태블릿 화면을 엽니다"
           >
-            {[10, 20, 30, 60].map((s) => (
-              <option key={s} value={s}>
-                ×{s}
-              </option>
-            ))}
-          </select>
-        </label>
+            <ExternalLink size={13} /> 소방차 화면 열기
+          </button>
+        </div>
+      </div>
+
+      {/* 사건 제어 */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-white px-4 py-2">
+        <span className="text-[12px] font-semibold text-muted">시나리오</span>
+        <div className="flex" role="group" aria-label="시나리오 선택">
+          {SCENARIO_ORDER.map((m) => (
+            <button
+              key={m}
+              onClick={() => sim.changeMode(m)}
+              title={SCENARIOS[m].description}
+              className={`-ml-px border px-3 py-1.5 text-[13px] first:ml-0 ${mode === m ? "z-10 border-navy bg-navy-soft font-semibold text-navy" : "border-line bg-white text-muted hover:bg-subtle"}`}
+            >
+              {MODE_LABEL[m]}
+            </button>
+          ))}
+        </div>
+        <span className="ml-2 truncate text-[13px] text-text" title={scenario.title}>
+          {scenario.incident.reportedAt} 신고 · {scenario.incident.name}
+        </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="font-mono text-[14px] tabular-nums" aria-label="경과 시간">
+            T+{formatClock(simTime)}
+          </span>
+          <button className={`btn ${running ? "" : "btn-fire"}`} onClick={running ? sim.pause : sim.start} disabled={status === "awaiting"}>
+            {running ? <Pause size={15} /> : <Play size={15} />}
+            {running ? "일시정지" : status === "awaiting" ? "투입 판단 대기" : status === "paused" ? "재개" : status === "finished" ? "다시 시작" : "출동 시나리오 시작"}
+          </button>
+          <button className="btn" onClick={sim.reset}>
+            <RotateCcw size={14} /> 초기화
+          </button>
+          <label className="flex items-center gap-1 text-[12px] text-muted">
+            배속
+            <select value={speed} onChange={(e) => sim.setSpeed(Number(e.target.value))} className="h-[34px] border border-line-strong bg-white px-1.5 text-[13px] text-text" aria-label="재생 배속">
+              {[10, 20, 30, 60].map((s) => (
+                <option key={s} value={s}>
+                  ×{s}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {/* 요약 표 */}
+      <div className="grid grid-cols-2 border-b border-line bg-white text-[13px] sm:grid-cols-5">
+        {[
+          ["진행 상태", status === "idle" ? "대기" : status === "awaiting" ? "투입 판단 대기" : status === "running" ? "출동 중" : status === "paused" ? "일시정지" : "현장 도착"],
+          ["투입 드론", `${activeDrones}대`],
+          ["거점 대기 드론", `${DRONE_POOL_TOTAL - activeDrones} / ${DRONE_POOL_TOTAL}대 (시범 ${DRONE_BASES.length}거점)`],
+          ["통보 대기", `${pending}건`],
+          ["소방차 도착 예정", status === "idle" ? "—" : `T+${formatClock(plan.truck.totalSec)}${launch === false ? " (드론 미투입)" : ""}`],
+        ].map(([k, v]) => (
+          <div key={k} className="border-r border-line px-4 py-2 last:border-r-0">
+            <div className="text-[11px] text-muted">{k}</div>
+            <div className="font-semibold">{v}</div>
+          </div>
+        ))}
       </div>
     </header>
   );

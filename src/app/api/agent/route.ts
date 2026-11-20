@@ -55,6 +55,26 @@ function stripJsonLine(text: string): string {
   return text.replace(/\{[^{}]*"status"[^{}]*\}\s*$/, "").trim();
 }
 
+/** RAG 출처 뽑기: 지식 인용 표식【…】과 '근거 문서: …' 줄을 모아 본문에서 뺀다 */
+function extractSources(text: string): { clean: string; sources: string[] } {
+  const found = new Set<string>();
+  let clean = text.replace(/【([^】]+)】/g, (_m, s: string) => {
+    found.add(`지식 ${s.replace(/^[a-z0-9]+_(?=gjw_)/, "")}`);
+    return "";
+  });
+  clean = clean.replace(/(?:^|\n)\s*\**근거 문서\**\s*[:：]\s*([^\n]+)/g, (_m, list: string) => {
+    list
+      .split(/[,·、/]/)
+      .map((x) => x.replace(/[*'"「」]/g, "").trim())
+      .filter(Boolean)
+      .forEach((x) => found.add(x));
+    return "";
+  });
+  // 화면은 마크다운을 그리지 않으므로 굵게(**) 표시만 지운다
+  clean = clean.replace(/\*\*/g, "");
+  return { clean: clean.trim(), sources: [...found] };
+}
+
 export async function POST(request: Request) {
   let req: AgentRequest;
   try {
@@ -72,18 +92,19 @@ export async function POST(request: Request) {
     const { text, threadId } = await askAgent(eventPrompt(req), req.threadId);
     const secs = ((Date.now() - started) / 1000).toFixed(1);
     const json = lastJson(text);
-    const clean = stripJsonLine(text);
+    const { clean, sources } = extractSources(stripJsonLine(text));
 
     let res: AgentResponse;
     if (req.type === "violation_detected") {
       const draft = buildReportDraft(req.violation);
-      const body = typeof json?.body === "string" && json.body.trim() ? json.body : clean;
+      const body = typeof json?.body === "string" && json.body.trim() ? extractSources(json.body).clean : clean;
       if (body) draft.body = body;
       res = {
         mode: "live",
         threadId,
         status: "pending",
         draft,
+        sources,
         message: clean || "신고서 초안이 작성되었습니다.",
         steps: [
           { agent: "report", text: `관할 매핑(코드): ${draft.jurisdictionShort}(${draft.jurisdictionCode}) → ${draft.agency}`, delayMs: 300 },
@@ -105,7 +126,7 @@ export async function POST(request: Request) {
         ],
       };
     } else {
-      res = { mode: "live", threadId, message: clean || text, steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
+      res = { mode: "live", threadId, sources, message: clean || text, steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
     }
     return NextResponse.json(res);
   } catch (e) {

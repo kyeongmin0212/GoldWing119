@@ -154,6 +154,8 @@ export interface ViolationRecord extends ViolationSample {
   draft?: ReportDraft;
   receiptNo?: string;
   agentMessage?: string;
+  /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
+  sources?: string[];
 }
 
 export type AgentName = "route" | "pathfinder" | "vision" | "report" | "system" | "watsonx";
@@ -164,6 +166,8 @@ export interface AgentLog {
   text: string;
   level: "info" | "progress" | "success" | "warn";
   simTime: number;
+  /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
+  sources?: string[];
 }
 
 /** /api/agent 요청 */
@@ -188,4 +192,6 @@ export interface AgentResponse {
   status?: "pending" | "submitted";
   threadId?: string;
   fallbackReason?: string;
+  /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
+  sources?: string[];
 }
