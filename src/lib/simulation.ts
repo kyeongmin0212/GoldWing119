@@ -34,6 +34,10 @@ export interface DroneSim {
 }
 
 export interface BlockageInfo {
+  /** accident: 도로 막힘(사고 등) / parking: 불법주차로 진입 곤란 */
+  kind: "accident" | "parking";
+  /** 지도·영상 표식용 짧은 이름 */
+  short: string;
   droneId: string;
   /** 정찰 드론이 차단 지점에 도착해 발견하는 시각 */
   atSec: number;
@@ -136,11 +140,39 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
   const scoutA = bl
     ? assignments.filter((a) => a.cluster.lastSeg < bl.segIndex).sort((x, y) => y.cluster.lastSeg - x.cluster.lastSeg)[0]
     : undefined;
+  // 막힘이 정찰 구간 안에 있으면(불법주차 등) 그 구간을 맡은 드론이 정찰하다 발견
+  const inA = bl && !scoutA ? assignments.find((a) => a.cluster.firstSeg <= bl.segIndex && bl.segIndex <= a.cluster.lastSeg) : undefined;
 
-  // 판단 전 기준 계획 (소방차는 예상 속도로 — 아직 사고를 모름)
-  const pending = routeAndTruck(sc, "base", !scoutA);
+  // 판단 전 기준 계획 (소방차는 예상 속도로 — 아직 막힘을 모름). 드론이 없으면 막힘을 그대로 지나감
+  const pending = routeAndTruck(sc, "base", !scoutA && !inA);
   let scout: DroneSim | null = null;
   let blockage: BlockageInfo | null = null;
+  if (bl && inA) {
+    // 정찰 경로 위에서 막힌 지점에 가장 가까워지는 시각 = 발견 시각
+    scout = planDrone(inA, pending.route, pending.truck);
+    let best = { s: scout.totalSec, d: Infinity };
+    for (let s = Math.floor(scout.scanStartSec); s <= Math.ceil(scout.totalSec); s++) {
+      const dd = distLatLng(droneAt(scout, s), bl.position);
+      if (dd < best.d - 1e-6) best = { s, d: dd };
+      if (dd < 0.03) break;
+    }
+    const stay = routeAndTruck(sc, "base", true).truck;
+    const det = routeAndTruck(sc, "detour", false).truck;
+    blockage = {
+      kind: bl.kind,
+      short: bl.short,
+      droneId: inA.droneId,
+      atSec: best.s,
+      decideBySec: pending.truck.times[bl.detour.fromSeg],
+      position: bl.position,
+      label: bl.label,
+      summary: bl.detour.summary,
+      stayArrivalSec: stay.totalSec,
+      detourArrivalSec: det.totalSec,
+      savedSec: stay.totalSec - det.totalSec,
+    };
+    if (blockage.atSec >= blockage.decideBySec) choice = "stay";
+  }
   if (bl && scoutA) {
     scout = planDrone(scoutA, pending.route, pending.truck);
     const road = pending.route.road;
@@ -154,6 +186,8 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     const stay = routeAndTruck(sc, "base", true).truck;
     const det = routeAndTruck(sc, "detour", false).truck;
     blockage = {
+      kind: bl.kind,
+      short: bl.short,
       droneId: scoutA.droneId,
       atSec: scout.totalSec,
       decideBySec: pending.truck.times[bl.detour.fromSeg],
@@ -172,6 +206,11 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
   const { route, truck } = active;
   const drones: DroneSim[] = [];
   for (const a of assignments) {
+    if (scout && a === inA) {
+      // 정찰 구간 안 막힘: 판단과 상관없이 정찰을 이어 가며 주차 차량 증거 촬영
+      drones.push(scout);
+      continue;
+    }
     if (scout && a === scoutA) {
       const d: DroneSim = { ...scout, points: [...scout.points], times: [...scout.times] };
       if (blockage && choice === "detour") {
@@ -181,7 +220,7 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
         const rejoin = from + bl!.detour.segments.length;
         extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), DRONE_SPEED_KMH);
       } else if (blockage && choice === "stay") {
-        // 차단 구간을 따라가며 길터주기 방송
+        // 막힌 구간을 따라가며 길터주기 방송
         const r = route.road;
         const fB = r.tools.nearest([bl!.position.lat, bl!.position.lng], r.idx[bl!.segIndex]).f;
         extend(d.points, d.times, r.tools.sub(fB, r.fr[bl!.segIndex + 1]).slice(1).map(toLatLng), SCAN_SPEED_KMH);

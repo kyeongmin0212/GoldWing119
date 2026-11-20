@@ -47,7 +47,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <Row label="현장">{scenario.incident.name}</Row>
         {blk && status === "rerouting" && (
-          <Row label="전방 차단 (드론 확인)" tone="fire">
+          <Row label={blk.kind === "parking" ? "진입로 불법주차 (드론 확인)" : "전방 도로 막힘 (드론 확인)"} tone="fire">
             {blk.label}
             <span className="block text-[17px] font-semibold text-text">상황실에서 우회로 판단 중</span>
           </Row>
@@ -62,9 +62,9 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
           </div>
         )}
         {blk && routeChoice === "stay" && (
-          <Row label="전방 차단 · 기존 경로 유지" tone="slow">
+          <Row label={blk.kind === "parking" ? "진입로 불법주차 · 기존 경로 유지" : "전방 도로 막힘 · 기존 경로 유지"} tone="slow">
             {blk.label}
-            <span className="block text-[17px] font-semibold text-text">드론 길터주기 방송으로 통과 유도</span>
+            <span className="block text-[17px] font-semibold text-text">{blk.kind === "parking" ? "주차 차량 사이로 서행 통과" : "드론 길터주기 방송으로 통과 유도"}</span>
           </Row>
         )}
         <Row label="현장 도착까지">{started ? `약 ${Math.ceil(remainSec / 60)}분 (T+${formatClock(plan.truck.totalSec)})` : "출동 대기"}</Row>

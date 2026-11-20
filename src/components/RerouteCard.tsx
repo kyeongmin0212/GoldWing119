@@ -15,7 +15,7 @@ export default function RerouteCard({ sim }: { sim: SimController }) {
   return (
     <div className={`box ${deciding ? "border-fire" : ""}`}>
       <div className="box-head">
-        전방 차단 · 우회로 안내
+        {b.kind === "parking" ? "진입로 불법주차 · 다른 경로 안내" : "전방 도로 막힘 · 더 빠른 길 안내"}
         <span className="tag ml-auto text-muted">경로 탐색 에이전트 · 규칙 계산</span>
         {!deciding && <span className={`tag ${routeChoice === "detour" ? "text-ok" : "text-muted"}`}>{routeChoice === "detour" ? "우회로 안내함" : "기존 경로 유지"}</span>}
       </div>

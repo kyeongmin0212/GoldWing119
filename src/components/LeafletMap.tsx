@@ -265,7 +265,7 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
         }
         L.marker(ll(blk.position), {
           icon: icon(
-            `<svg width="22" height="22" viewBox="-11 -11 22 22"><rect x="-10" y="-10" width="20" height="20" fill="#fff" stroke="${C.avoid}" stroke-width="2.5"/><path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="${C.avoid}" stroke-width="2.6"/></svg>${compact ? "" : label("사고 · 차로 차단", C.avoid, "margin-left:4px")}`,
+            `<svg width="22" height="22" viewBox="-11 -11 22 22"><rect x="-10" y="-10" width="20" height="20" fill="#fff" stroke="${C.avoid}" stroke-width="2.5"/><path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="${C.avoid}" stroke-width="2.6"/></svg>${compact ? "" : label(blk.short, C.avoid, "margin-left:4px")}`,
             [22, 22],
             [11, 11],
           ),
@@ -310,7 +310,7 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
           </div>
           {plan.blockage && (
             <div className="flex items-center gap-2">
-              <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-ok" /> 권장 우회로 (드론이 전방 차단 발견 시)
+              <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-ok" /> 권장 우회로 (드론이 막힌 곳 발견 시)
             </div>
           )}
           <div className="text-faint">비행 제한 구역 반영은 추후 보완</div>

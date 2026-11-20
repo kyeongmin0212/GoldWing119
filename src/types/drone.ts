@@ -5,7 +5,7 @@ export type LatLng = { lat: number; lng: number };
 /** 내부 계산용 평면 좌표(km). 원점은 지도 좌상단. */
 export type XY = { x: number; y: number };
 
-export type ScenarioMode = "urban" | "regional" | "night";
+export type ScenarioMode = "urban" | "regional";
 
 /** awaiting = 드론 투입 판단 카드가 떠서 관제요원 승인을 기다리는 상태
  *  rerouting = 선행 드론이 전방 차단을 발견해 우회로 안내 여부를 관제요원이 판단하는 상태 */
@@ -73,18 +73,23 @@ export interface ViolationSample {
   confidence: number;
 }
 
-/** 드론 선행 정찰로 발견하는 전방 차단(사고 등) — 혼잡 DB 에 없는 돌발 상황 */
+/** 드론 정찰로 발견하는 전방 막힘 — accident: 도로 막힘(사고 등 돌발), parking: 불법주차로 소방차 진입 곤란 */
 export interface RoadBlockage {
+  kind: "accident" | "parking";
   /** 막힌 지점이 있는 구간 (기존 경로 기준 인덱스) */
   segIndex: number;
   position: LatLng;
   label: string;
+  /** 지도·영상 표식용 짧은 이름 */
+  short: string;
   /** 그대로 지나가면 이 구간 속도 (km/h) */
   blockedSpeedKmh: number;
   detour: {
     /** 이 구간부터 segments.length 개 구간을 우회 구간으로 바꾼다 (구간 수는 같게) */
     fromSeg: number;
     segments: RoadSegment[];
+    /** 우회 도로 모양을 받을 때 거쳐 갈 점 (막힌 길로 가지 않도록) */
+    via?: LatLng[];
     /** 소방차 화면에 띄울 안내 문구 */
     summary: string;
   };

@@ -36,7 +36,7 @@ interface FrameState {
   truck: TruckTimeline;
   truckOn: boolean;
   parked: { sample: ViolationSample; record?: ViolationRecord }[];
-  blockage: LatLng | null;
+  blockage: { pos: LatLng; kind: "accident" | "parking"; short: string } | null;
   /** 길터주기 방송 중 — 같은 방향 차량이 우측으로 비켜 정지 */
   yielding: boolean;
 }
@@ -138,7 +138,7 @@ export default function DroneVisionFeed({
     truck: plan.truck,
     truckOn: status !== "idle" && status !== "awaiting",
     parked: sim.scenario.violations.filter((v) => myIds.has(v.id)).map((v) => ({ sample: v, record: violations.find((r) => r.id === v.id) })),
-    blockage: plan.blockage?.position ?? null,
+    blockage: plan.blockage ? { pos: plan.blockage.position, kind: plan.blockage.kind, short: plan.blockage.short } : null,
     yielding: phase === "scan" && !!drone && simTime >= drone.broadcastSec,
   };
 
@@ -361,13 +361,28 @@ export default function DroneVisionFeed({
         }
       }
 
-      // 사고 현장 (전방 차단)
-      if (st.blockage && meters(pos, st.blockage) < viewR + 60) {
-        const bp = project(st.blockage);
+      // 불법주차로 진입 곤란: 주차 차량은 아래에서 그리고, 막힌 구간만 점선 상자로 표시
+      if (st.blockage?.kind === "parking" && meters(pos, st.blockage.pos) < viewR + 60) {
+        const bp = project(st.blockage.pos);
+        const r = carL * 2.4;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = "#f59e0b";
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(bp.x - r, bp.y - r, r * 2, r * 2);
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(120,53,15,0.92)";
+        ctx.fillRect(bp.x - r, bp.y + r + 4, 150, 20);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText(st.blockage.short, bp.x - r + 6, bp.y + r + 19);
+      }
+      // 사고 현장 (도로 막힘)
+      if (st.blockage?.kind === "accident" && meters(pos, st.blockage.pos) < viewR + 60) {
+        const bp = project(st.blockage.pos);
         let bi = 0;
         let bd = Infinity;
         for (let i = 0; i < pts.length; i++) {
-          const dd = meters(st.blockage, pts[i]);
+          const dd = meters(st.blockage.pos, pts[i]);
           if (dd < bd) {
             bd = dd;
             bi = i;
@@ -645,15 +660,22 @@ export default function DroneVisionFeed({
   // 선행 정찰 드론: 정찰 구간을 지나 소방차 경로를 따라 전방 확인 → 차단 발견 → 우회로 확인
   const blk = plan.blockage && drone && drone.assignment.droneId === plan.blockage.droneId ? plan.blockage : null;
   const ahead = phase === "scan" && !!drone?.aheadSec && simTime >= drone.aheadSec;
-  const scoutBanner = !blk || !ahead
+  const parkingSeen = !!blk && blk.kind === "parking" && phase === "scan" && simTime >= blk.atSec;
+  const scoutBanner = parkingSeen && blk
+    ? sim.routeChoice === "detour"
+      ? { text: `다른 진입 경로 안내함 — ${blk.summary} · 주차 차량 증거 촬영 중`, cls: "bg-emerald-700 text-white" }
+      : sim.routeChoice === "stay"
+        ? { text: `기존 경로 유지 — ${blk.label} · 주차 차량 증거 촬영 중`, cls: "bg-fire text-white" }
+        : { text: `진입로 불법주차 확인 — ${blk.label} · 상황실 경로 판단 중`, cls: "bg-fire text-white" }
+    : !blk || !ahead
     ? null
     : simTime < blk.atSec
       ? { text: "소방차 경로를 따라 전방 선행 정찰 중", cls: "bg-black/60 text-white" }
       : sim.routeChoice === "detour"
         ? { text: `우회로 선행 확인 중 — ${blk.summary}`, cls: "bg-emerald-700 text-white" }
         : sim.routeChoice === "stay"
-          ? { text: `전방 차단 구간 길터주기 방송 중 — ${blk.label}`, cls: "bg-fire text-white" }
-          : { text: `전방 차단 확인 — ${blk.label} · 상황실 우회로 판단 중`, cls: "bg-fire text-white" };
+          ? { text: `막힌 구간 길터주기 방송 중 — ${blk.label}`, cls: "bg-fire text-white" }
+          : { text: `전방 도로 막힘 확인 — ${blk.label} · 상황실 경로 판단 중`, cls: "bg-fire text-white" };
   const banner = scoutBanner
     ? scoutBanner
     : broadcasting

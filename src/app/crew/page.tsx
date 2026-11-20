@@ -39,7 +39,7 @@ export default function CrewPage() {
   const decision = useMemo(() => decideDispatch(scenario, HOTSPOTS, DRONE_BASES), [scenario]);
   const launch = snap?.launch ?? null;
   const routeChoice = snap?.routeChoice ?? null;
-  const plan = useMemo(() => buildSimPlan(scenario, decision, launch === true, routeChoice), [scenario, decision, launch, routeChoice]);
+  const plan = useMemo(() => buildSimPlan(scenario, decision, launch !== false, routeChoice), [scenario, decision, launch, routeChoice]);
 
   const simTime = !snap
     ? 0

@@ -44,14 +44,14 @@ async function callAgent(body: AgentRequest): Promise<AgentResponse> {
 }
 
 export function useGoldenTimeSim() {
-  const [mode, setMode] = useState<ScenarioMode>("urban");
+  const [mode, setMode] = useState<ScenarioMode>("regional");
   const scenario = SCENARIOS[mode];
   const decision = useMemo(() => decideDispatch(scenario, HOTSPOTS, DRONE_BASES), [scenario]);
   /** null = 아직 결정 전, true = 드론 투입 승인, false = 소방차만 */
   const [launch, setLaunch] = useState<boolean | null>(null);
   /** 전방 차단 발견 시 관제요원의 경로 판단 (null = 판단 전) */
   const [routeChoice, setRouteChoice] = useState<RouteChoice | null>(null);
-  const plan = useMemo(() => buildSimPlan(scenario, decision, launch === true, routeChoice), [scenario, decision, launch, routeChoice]);
+  const plan = useMemo(() => buildSimPlan(scenario, decision, launch !== false, routeChoice), [scenario, decision, launch, routeChoice]);
 
   const [status, setStatus] = useState<SimStatus>("idle");
   const [speed, setSpeed] = useState(30);
@@ -224,7 +224,7 @@ export function useGoldenTimeSim() {
         at: blk.atSec,
         run: () => {
           setFocusDrone(blk.droneId);
-          addLog("vision", `[${blk.droneId}] 전방 차단 확인 — ${blk.label}`, "warn");
+          addLog("vision", blk.kind === "parking" ? `[${blk.droneId}] 현장 진입로 불법주차 확인 — ${blk.label} · 차량별 통보 초안은 따로 작성` : `[${blk.droneId}] 전방 도로 막힘 확인 — ${blk.label}`, "warn");
           addLog(
             "route",
             `우회로 비교(규칙 계산): 기존 경로 유지 시 현장 T+${formatClock(blk.stayArrivalSec)} / 우회(${blk.summary}) 시 T+${formatClock(blk.detourArrivalSec)} → ${formatClock(blk.savedSec)} 단축. 소방차 갈림길 도착 T+${formatClock(blk.decideBySec)} 전까지 판단 필요`,
@@ -331,7 +331,7 @@ export function useGoldenTimeSim() {
         addLog("route", `소방차 경로 변경 — 현장 도착 예정 T+${formatClock(blk.detourArrivalSec)} (기존 유지 대비 ${formatClock(blk.savedSec)} 단축)`, "success");
         addLog("pathfinder", `[${blk.droneId}] 원격 조종자가 우회로를 앞서 비행하며 통행 가능 여부 확인`, "info");
       } else {
-        addLog("system", "관제요원 [기존 경로 유지] — 차단 구간은 드론 길터주기 방송으로 통과 유도", "info");
+        addLog("system", blk.kind === "parking" ? "관제요원 [기존 경로 유지] — 불법주차 차량 사이로 서행 통과 (필요하면 견인 지원 요청: 소방기본법 제25조제4항)" : "관제요원 [기존 경로 유지] — 막힌 구간은 드론 길터주기 방송으로 통과 유도", "info");
         addLog("route", `현장 도착 예정 T+${formatClock(blk.stayArrivalSec)}`, "info");
       }
       setRouteChoice(choice);

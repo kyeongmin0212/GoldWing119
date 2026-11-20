@@ -8,7 +8,7 @@ import { decideDispatch } from "../src/lib/dispatch.ts";
 import { buildSimPlan, type SimPlan } from "../src/lib/simulation.ts";
 import type { RouteChoice, Scenario } from "../src/types/drone.ts";
 
-const expected = { urban: 1, regional: 2, night: 0 } as const;
+const expected = { regional: 1, urban: 1 } as const;
 let failed = 0;
 const fail = (m: string) => { console.log("  ✗ " + m); failed++; };
 

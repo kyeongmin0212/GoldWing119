@@ -9,7 +9,7 @@ import { SCENARIOS, SCENARIO_ORDER } from "@/data/scenarioData";
 import { formatClock } from "@/lib/geo";
 import type { SimController } from "@/lib/useGoldenTimeSim";
 
-const MODE_LABEL = { urban: "도심 · 출근시간", regional: "광역 · 퇴근시간", night: "야간 · 한산" } as const;
+const MODE_LABEL = { regional: "1 · 도로 막힘 → 빠른 길", urban: "2 · 불법주차 → 다른 경로" } as const;
 
 function useNow() {
   const [now, setNow] = useState<Date | null>(null);

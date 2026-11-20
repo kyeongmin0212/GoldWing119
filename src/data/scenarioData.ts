@@ -7,9 +7,9 @@ import type { Scenario, ScenarioMode } from "../types/drone.ts";
 export const SCENARIOS: Record<ScenarioMode, Scenario> = {
   urban: {
     mode: "urban",
-    title: "광주 도심형 · 출근길 — 남구 봉선동 공동주택 화재",
-    description: "출근 시간대 백운광장 상습정체 + 봉선동 이면도로 불법주정차 다발 구간",
-    focus: "골목길 불법주정차 단속 집중",
+    title: "시나리오 2 · 불법주차로 진입 곤란 → 다른 경로 안내 + 통보 초안 — 남구 봉선동 공동주택 화재 (출근길)",
+    description: "백운광장 상습정체 + 현장 진입로(봉선2로) 불법주차 2대로 소방차 진입 곤란",
+    focus: "드론이 진입로 불법주차를 발견 → 다른 진입 경로 안내, 주차 차량은 지자체 통보 초안",
     station: { name: "서부소방서 상무 (가상 위치)", position: { lat: 35.1523, lng: 126.8525 } },
     incident: {
       name: "남구 봉선동 공동주택",
@@ -22,17 +22,32 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
       { to: { lat: 35.15272, lng: 126.88119 }, speedKmh: 22, label: "상무대로 출근길 서행", congested: true, freeFlowKmh: 50 },
       { to: { lat: 35.13359, lng: 126.89478 }, speedKmh: 30, label: "군분로", freeFlowKmh: 45 },
       { to: { lat: 35.13473, lng: 126.89899 }, speedKmh: 12, label: "백운광장 교차로 상습정체 (회재로)", congested: true, hotspotId: "H-BU", freeFlowKmh: 40 },
-      { to: { lat: 35.12893, lng: 126.905 }, speedKmh: 10, label: "봉선로 이면도로 (불법주정차 다발)", congested: true, hotspotId: "H-BS", freeFlowKmh: 30 },
-      { to: { lat: 35.1265, lng: 126.91 }, speedKmh: 8, label: "현장 진입로", congested: true, hotspotId: "H-BS", freeFlowKmh: 25 },
+      { to: { lat: 35.12535, lng: 126.90631 }, speedKmh: 18, label: "봉선로 출근길 서행", congested: true, freeFlowKmh: 40 },
+      { to: { lat: 35.1265, lng: 126.91 }, speedKmh: 8, label: "봉선2로 · 현장 진입로 (불법주정차 다발)", congested: true, hotspotId: "H-BS", freeFlowKmh: 25 },
     ],
+    // 드론이 정찰하다 발견 → 관제요원이 다른 진입 경로 안내 여부 판단, 주차 차량은 통보 초안
+    blockage: {
+      kind: "parking",
+      segIndex: 4,
+      position: { lat: 35.12548, lng: 126.90745 },
+      label: "봉선2로 불법주차 2대 — 소방차 진입 곤란 (가상)",
+      short: "불법주차 · 진입 곤란",
+      blockedSpeedKmh: 3,
+      detour: {
+        fromSeg: 4,
+        via: [{ lat: 35.124, lng: 126.9095 }],
+        summary: "봉선로 직진 → 봉선로133번길 → 봉선로121번길 → 봉선2로19번길로 현장 진입",
+        segments: [{ to: { lat: 35.1265, lng: 126.91 }, speedKmh: 15, label: "봉선로133번길·121번길 → 봉선2로19번길 (다른 진입 경로)", congested: true, freeFlowKmh: 25 }],
+      },
+    },
     violations: [
       {
         id: "V-U1",
         plate: "12가 3456",
         vehicleType: "승용차 (흰색 SUV)",
         reason: "긴급차량 진로 방해 / 소화전 5m 이내 주정차",
-        position: { lat: 35.13022, lng: 126.90352 },
-        locationLabel: "전남광주통합특별시 남구 봉선동 이면도로 (가상 지점)",
+        position: { lat: 35.12544, lng: 126.90688 },
+        locationLabel: "전남광주통합특별시 남구 봉선동 봉선2로 현장 진입로 (가상 지점)",
         confidence: 0.94,
       },
       {
@@ -40,7 +55,7 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
         plate: "75나 7712",
         vehicleType: "승합차 (회색)",
         reason: "소방자동차 전용구역 주차 (공동주택 진입로)",
-        position: { lat: 35.12556, lng: 126.90852 },
+        position: { lat: 35.1255, lng: 126.908 },
         locationLabel: "전남광주통합특별시 남구 봉선동 공동주택 진입로 (가상 지점)",
         confidence: 0.88,
       },
@@ -48,9 +63,9 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
   },
   regional: {
     mode: "regional",
-    title: "전남-광주 광역형 · 퇴근길 — 나주시 → 남구 효천지구 화재 (옛 시도 경계)",
-    description: "나주 혁신도시 출동, 국도1호선 광주 진입 병목 + 효천지구 이면도로 불법주정차",
-    focus: "장거리 정체 구간 길터주기 유도 + 경계 지역 단속",
+    title: "시나리오 1 · 도로 막힘 → 더 빠른 길 안내 — 나주 빛가람 → 남구 효천지구 화재 (퇴근길)",
+    description: "국도1호선 광주 진입 병목, 드론이 앞서 정찰하다 서문대로 사고로 길이 막힌 것을 발견",
+    focus: "처음 안내한 길 대신 더 빠른 길(포충로·임암길)로 소방차 안내",
     station: { name: "나주소방서 빛가람센터 (가상 위치)", position: { lat: 35.02, lng: 126.792 } },
     incident: {
       name: "남구 효천지구 상가주택",
@@ -66,13 +81,15 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
       { to: { lat: 35.0829, lng: 126.86718 }, speedKmh: 24, label: "서문대로 퇴근길 서행", congested: true },
       { to: { lat: 35.09834, lng: 126.8774 }, speedKmh: 24, label: "서문대로 (효천 방면)", congested: true },
       { to: { lat: 35.10009, lng: 126.86539 }, speedKmh: 12, label: "효천로·임암길 이면도로", congested: true, freeFlowKmh: 30 },
-      { to: { lat: 35.09592, lng: 126.86979 }, speedKmh: 8, label: "효천지구 이면도로·현장 진입로 (불법주정차 다발)", congested: true, hotspotId: "H-HC", freeFlowKmh: 25 },
+      { to: { lat: 35.09592, lng: 126.86979 }, speedKmh: 8, label: "효천지구 현장 진입로", congested: true, freeFlowKmh: 25 },
     ],
     // 혼잡 DB 에 없는 돌발 상황 — 선행 드론이 경로를 따라 정찰하다 발견 → 관제요원이 우회로 안내 여부 판단
     blockage: {
+      kind: "accident",
       segIndex: 4,
       position: { lat: 35.08675, lng: 126.8759 },
       label: "서문대로 추돌사고 — 2개 차로 차단 (가상)",
+      short: "사고 · 차로 차단",
       blockedSpeedKmh: 10,
       detour: {
         fromSeg: 4,
@@ -83,47 +100,9 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
         ],
       },
     },
-    violations: [
-      {
-        id: "V-R1",
-        plate: "812다 4518",
-        vehicleType: "화물차 (1톤 트럭)",
-        reason: "긴급차량 진로 방해 / 교차로 모퉁이 5m 이내 정차",
-        position: { lat: 35.09956, lng: 126.86627 },
-        locationLabel: "전남광주통합특별시 남구 효천지구 이면도로 교차로 (옛 광주·전남 경계 인근, 가상 지점)",
-        confidence: 0.91,
-      },
-      {
-        id: "V-R2",
-        plate: "57라 2093",
-        vehicleType: "승용차 (검정 세단)",
-        reason: "소화전 5m 이내 주정차",
-        position: { lat: 35.09772, lng: 126.86777 },
-        locationLabel: "전남광주통합특별시 남구 효천지구 상가 앞 (가상 지점)",
-        confidence: 0.86,
-      },
-    ],
-  },
-  night: {
-    mode: "night",
-    title: "야간 · 한산 도로 — 화순군 화순읍 공장 화재",
-    description: "새벽 시간 소통 원활, 경로상 혼잡 DB 지점 없음",
-    focus: "드론 투입 불필요 판단 (소방차 단독 출동)",
-    station: { name: "화순소방서 (가상 위치)", position: { lat: 35.0612, lng: 126.9862 } },
-    incident: {
-      name: "화순읍 공장 (가상 위치)",
-      position: { lat: 35.0405, lng: 126.9625 },
-      type: "공장 화재 신고 (가상)",
-      reportedAt: "02:40",
-    },
-    truckStart: { lat: 35.0612, lng: 126.9862 },
-    truckRoute: [
-      { to: { lat: 35.05543, lng: 126.97795 }, speedKmh: 40, label: "중앙로·충의로 (원활)" },
-      { to: { lat: 35.05126, lng: 126.97209 }, speedKmh: 40, label: "칠충로·화보로 (원활)" },
-      { to: { lat: 35.0405, lng: 126.9625 }, speedKmh: 50, label: "학포로 → 공장 진입로" },
-    ],
     violations: [],
   },
 };
 
-export const SCENARIO_ORDER: ScenarioMode[] = ["urban", "regional", "night"];
+/** 화면 순서: 시나리오 1(도로 막힘) → 시나리오 2(불법주차) */
+export const SCENARIO_ORDER: ScenarioMode[] = ["regional", "urban"];

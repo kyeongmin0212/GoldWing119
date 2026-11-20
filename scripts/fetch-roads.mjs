@@ -41,7 +41,7 @@ for (const [mode, sc] of Object.entries(SCENARIOS)) {
   if (sc.blockage) {
     const { fromSeg, segments } = sc.blockage.detour;
     const j = fromSeg === 0 ? sc.truckStart : sc.truckRoute[fromSeg - 1].to;
-    const dd = await osrm([j, ...segments.map((x) => x.to)]);
+    const dd = await osrm([j, ...(sc.blockage.detour.via ?? []), ...segments.map((x) => x.to)]);
     const dl = dd.routes[0].geometry.coordinates.map(([lng, lat]) => [+lat.toFixed(6), +lng.toFixed(6)]);
     detours[mode] = { distanceM: Math.round(dd.routes[0].distance), line: dl };
     console.log(mode, "detour", `${(dd.routes[0].distance / 1000).toFixed(2)}km`, `${dl.length}pts`);
