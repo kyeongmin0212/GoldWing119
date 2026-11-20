@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import type { AgentHealth, AgentRequest, AgentResponse } from "@/types/drone";
 import { mockAgent } from "@/lib/mockAgent";
 import { friendlyNoDocAnswer } from "@/lib/noDocAnswer";
+import { cleanChatAnswer } from "@/lib/chatGuard";
 import { buildReportDraft, checkModelSentences, draftFactSentence } from "@/lib/report";
 import { askAgent, lastJson, mask, pingAgent, wxoConfigured } from "@/lib/wxo";
 
@@ -132,7 +133,10 @@ export async function POST(request: Request) {
         ],
       };
     } else {
-      res = { mode: "live", threadId, sources, message: friendlyNoDocAnswer(clean || text, req.message), steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
+      // 질의 답에 차량 검증·통보 초안 결과가 섞여 오면 그 부분을 잘라냄 (전부 섞인 것이면 다시 물어보라고 안내)
+      const guarded = cleanChatAnswer(friendlyNoDocAnswer(clean || text, req.message));
+      const message = guarded.text || "질문과 관계없는 통보 초안·검증 내용이 섞여 와서 표시하지 않았습니다. 같은 질문을 한 번 더 보내 주세요.";
+      res = { mode: "live", threadId, sources, message, steps: [{ agent: "watsonx", text: `응답 (${secs}s)${guarded.cut ? " — 섞여 온 초안·검증 내용 제외" : ""}`, delayMs: 200 }] };
     }
     return NextResponse.json(res);
   } catch (e) {

@@ -194,6 +194,10 @@ export interface AgentLog {
   simTime: number;
   /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
   sources?: string[];
+  /** 질의 탭 표시용: 관제요원 질문(q)·그 답(a). 이 표시가 없는 기록(초안 완료 등)은 질의 탭에 나오지 않음 */
+  qa?: "q" | "a";
+  /** 답(a)이면 어느 질문의 답인지 (질문 기록 id) — 질의 탭에서 질문 바로 아래에 붙여 보여 줌 */
+  qaOf?: string;
 }
 
 /** /api/agent 요청 */

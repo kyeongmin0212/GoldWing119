@@ -88,10 +88,11 @@ export function useGoldenTimeSim() {
   simTimeRef.current = simTime;
   backendRef.current = backend;
 
-  const addLog = useCallback((agent: AgentName, text: string, level: AgentLog["level"] = "info", sources?: string[]) => {
+  const addLog = useCallback((agent: AgentName, text: string, level: AgentLog["level"] = "info", sources?: string[], qa?: AgentLog["qa"], qaOf?: string) => {
     logSeq.current += 1;
-    const entry: AgentLog = { id: `L${logSeq.current}`, agent, text, level, simTime: simTimeRef.current, sources };
+    const entry: AgentLog = { id: `L${logSeq.current}`, agent, text, level, simTime: simTimeRef.current, sources, qa, qaOf };
     setLogs((l) => [...l.slice(-199), entry]);
+    return entry.id;
   }, []);
 
   /** MOCK 전환 사유는 같은 내용이면 한 번만 표시 */
@@ -453,32 +454,40 @@ export function useGoldenTimeSim() {
     [violations, patchViolation, addLog],
   );
 
+  // 질의는 한 번에 하나씩: 앞 질문의 답이 온 뒤 다음 질문을 보내 답 순서가 질문 순서와 같게 한다
+  const chatQueue = useRef<Promise<void>>(Promise.resolve());
   const chat = useCallback(
-    async (message: string) => {
+    (message: string) => {
       const gen = genRef.current;
-      addLog("system", `관제요원: ${message}`, "info");
-      const context = [
-        `시나리오: ${scenario.title}`,
-        `경과: T+${formatClock(simTimeRef.current)}`,
-        `드론 투입: ${launch ? plan.drones.map((d) => d.assignment.droneId).join(", ") : "없음"}`,
-        `탐지 차량: ${violations.map((v) => `${v.plate}(${v.status}, ${mapJurisdiction(v.position).short})`).join(", ") || "없음"}`,
-        "[이 시제품의 절차 — 질문이 시연·시제품 사용법이면 이대로 답할 것] 에이전트는 지자체 통보 초안만 작성한다. 관제요원이 초안을 검토·보관([검토 완료])하고, 실제 통보는 담당자가 관할 지자체 시스템에서 별도로 진행한다. 시스템은 자동으로 통보·신고하지 않으며 위반 확정·과태료·견인 결정은 지자체가 한다. 드론 투입과 우회로 안내는 관제요원이 승인하고, 드론은 원격 조종자가 조종한다.",
-      ].join("\n");
-      try {
-        setBusyAgent("watsonx");
-        const res = await callAgent({ type: "chat", message, context, threadId: threadRef.current });
+      const qid = addLog("system", `관제요원: ${message}`, "info", undefined, "q");
+      const job = async () => {
         if (gen !== genRef.current) return;
-        noteBackend(res);
-        noteFallback(res);
-        if (res.threadId) threadRef.current = res.threadId;
-        setBusyAgent(null);
-        addLog("watsonx", res.message, "success", res.sources);
-      } catch (e) {
-        setBusyAgent(null);
-        addLog("system", `질의 오류: ${e instanceof Error ? e.message : e}`, "warn");
-      }
+        // 차량 번호·초안 상태는 보내지 않는다 — 보내면 감독 에이전트가 검증·초안 에이전트를 불러 그 결과를 답에 섞음
+        const context = [
+          `시나리오: ${scenario.title}`,
+          `경과: T+${formatClock(simTimeRef.current)}`,
+          `드론 투입: ${launch ? plan.drones.map((d) => d.assignment.droneId).join(", ") : "없음"}`,
+          `탐지 차량: ${violationsRef.current.length}대 (검증·통보 초안은 대시보드가 따로 처리 중)`,
+          "[답변 규칙] 관제요원의 질문에만 답할 것. 차량 검증·통보 초안 작성은 이 질의에서 하지 말고, 다른 에이전트를 호출해 초안·검증 결과를 답에 넣지 말 것.",
+          "[이 시제품의 절차 — 질문이 시연·시제품 사용법이면 이대로 답할 것] 에이전트는 지자체 통보 초안만 작성한다. 관제요원이 초안을 검토·보관([검토 완료])하고, 실제 통보는 담당자가 관할 지자체 시스템에서 별도로 진행한다. 시스템은 자동으로 통보·신고하지 않으며 위반 확정·과태료·견인 결정은 지자체가 한다. 드론 투입과 우회로 안내는 관제요원이 승인하고, 드론은 원격 조종자가 조종한다.",
+        ].join("\n");
+        try {
+          const res = await callAgent({ type: "chat", message, context, threadId: threadRef.current });
+          if (gen !== genRef.current) return;
+          noteBackend(res);
+          noteFallback(res);
+          if (res.threadId) threadRef.current = res.threadId;
+          addLog("watsonx", res.message, "success", res.sources, "a", qid);
+        } catch (e) {
+          if (gen !== genRef.current) return;
+          addLog("system", `질의 오류: ${e instanceof Error ? e.message : e}`, "warn", undefined, "a", qid);
+        }
+      };
+      const next = chatQueue.current.then(job, job);
+      chatQueue.current = next.catch(() => {});
+      return next;
     },
-    [scenario.title, launch, plan.drones, violations, addLog, noteBackend, noteFallback],
+    [scenario.title, launch, plan.drones, addLog, noteBackend, noteFallback],
   );
 
   // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 16 / 출동 2"
