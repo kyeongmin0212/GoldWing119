@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/types/drone";
 import { mockAgent } from "@/lib/mockAgent";
-import { buildReportDraft } from "@/lib/report";
+import { buildReportDraft, checkModelSentences, draftFactSentence } from "@/lib/report";
 import { askAgent, lastJson, mask, wxoConfigured } from "@/lib/wxo";
 
 export const runtime = "nodejs";
@@ -21,9 +21,10 @@ function eventPrompt(req: AgentRequest): string {
     const draft = buildReportDraft(req.violation);
     return [
       "[대시보드 이벤트] 선행 드론이 긴급출동 진로 방해 의심 차량을 탐지했습니다.",
-      "아래 JSON 은 코드가 계산한 사실입니다. 이것만 근거로 지자체 통보 초안 본문(3~4문장)을 작성하세요. 초안만 작성하며 통보·신고는 하지 않습니다.",
-      "위반 확정·과태료·견인 여부는 판단하지 말고 담당자 확인이 필요하다고 적으세요.",
-      '마지막 줄에 {"status":"pending","body":"<초안 본문>"} JSON 한 줄을 출력하세요.',
+      "아래 JSON 은 코드가 계산한 사실입니다. 차량·위치·관측 시각·의심 사유를 적는 첫 문장은 코드가 직접 넣습니다.",
+      "당신은 그 뒤에 붙일 지자체 통보 초안 문장 1~2개만 작성하세요: 촬영 자료를 관할 지자체에 통보하려 한다는 것, 위반 여부·과태료·견인은 담당자 확인이 필요하다는 것. 초안만 작성하며 통보·신고는 하지 않습니다.",
+      "날짜·시각·번호판·주소는 쓰지 마세요. 위반을 확정하지 말고 '의심됩니다'처럼 쓰세요.",
+      '마지막 줄에 {"status":"pending","body":"<초안 문장>"} JSON 한 줄을 출력하세요.',
       JSON.stringify({
         event: "violation_detected",
         plate: req.violation.plate + " (가상)",
@@ -89,18 +90,21 @@ export async function POST(request: Request) {
     let res: AgentResponse;
     if (req.type === "violation_detected") {
       const draft = buildReportDraft(req.violation);
-      const body = typeof json?.body === "string" && json.body.trim() ? extractSources(json.body).clean : clean;
-      if (body) draft.body = body;
+      // 첫 문장(번호판·위치·관측 시각)은 코드가 넣고, 모델 문장은 검사를 통과할 때만 뒤에 붙인다
+      const raw = typeof json?.body === "string" && json.body.trim() ? extractSources(json.body).clean : clean;
+      const checked = checkModelSentences(raw);
+      if (checked.ok) draft.body = `${draftFactSentence(req.violation, draft.detectedAt)} ${checked.text}`;
       res = {
         mode: "live",
         threadId,
         status: "pending",
         draft,
         sources,
-        message: clean || "통보 초안이 작성되었습니다.",
+        message: checked.ok ? clean || "통보 초안이 작성되었습니다." : `[${draft.plate}] 통보 초안 작성 — 모델 문장 검사 탈락(${checked.why}) → 코드 초안 사용`,
         steps: [
           { agent: "report", text: `관할 매핑(코드): ${draft.jurisdictionShort}(${draft.jurisdictionCode}) → ${draft.agency}`, delayMs: 300 },
           { agent: "watsonx", text: `Orchestrate 수퍼바이저 응답 수신 (${secs}s) — 초안 본문 작성`, delayMs: 400 },
+          ...(checked.ok ? [] : [{ agent: "report" as const, text: `모델 문장 검사 탈락(${checked.why}) → 코드 초안 사용 (번호판·위치·관측 시각은 관측값)`, delayMs: 300 }]),
           { agent: "report", text: "통보 초안 완료 — 관제요원 검토 대기 (자동 통보 없음)", delayMs: 300 },
         ],
       };

@@ -55,7 +55,29 @@ export function buildReportDraft(v: ViolationSample & { detectedAtIso: string })
       "얼굴 자동 블러 처리본 첨부",
     ],
     body:
-      `119 긴급출동 중 선행 드론이 ${v.locationLabel}에서 ${v.vehicleType} ${v.plate}(가상)을 포착했습니다. ` +
-      `위반 의심 사유는 '${v.reason}'입니다. 소방 출동 연계 촬영 자료(사진 2장·좌표·해시)를 관할 지자체에 통보하고자 하며, 위반 여부와 처분은 ${j.agency} 담당자의 확인을 요청드립니다.`,
+      `${draftFactSentence(v, detectedAt)} ` +
+      `소방 출동 연계 촬영 자료(사진 2장·좌표·해시)를 관할 지자체에 통보하고자 하며, 위반 여부와 처분은 ${j.agency} 담당자의 확인을 요청드립니다.`,
   };
+}
+
+/** 초안 첫 문장 — 번호판·위치·차종·관측 시각·의심 사유는 모델이 쓰지 않고 관측값을 그대로 넣는다 */
+export function draftFactSentence(v: ViolationSample, detectedAt: string): string {
+  return `119 긴급출동 중 선행 드론이 ${v.locationLabel}에서 ${v.vehicleType} ${v.plate}(가상)을 포착했습니다(관측 시각 ${detectedAt}). 위반 의심 사유는 '${v.reason}'입니다.`;
+}
+
+// 모델이 쓴 문장 검사 — 날짜·시각·번호판을 지어내거나, 다른 질문의 답이 섞이면 버리고 코드 초안을 쓴다
+const REJECT: { re: RegExp; why: string }[] = [
+  { re: /\d+\s*월\s*\d+\s*일|\d{4}\s*(?:년|[.\-/]\s*\d)|\d{1,2}\s*:\s*\d{2}|\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?|오전\s*\d|오후\s*\d/, why: "날짜·시각을 직접 씀" },
+  { re: /\d{2,3}\s?[가-힣]\s?\d{4}/, why: "번호판을 직접 씀" },
+  { re: /문서에서 확인할 수 없|검토하고 보관|질의|질문/, why: "다른 질문의 답이 섞임" },
+];
+
+export function checkModelSentences(raw: string): { ok: true; text: string } | { ok: false; why: string } {
+  const text = raw.replace(/\s+/g, " ").trim();
+  if (!text) return { ok: false, why: "빈 응답" };
+  if (text.length > 400) return { ok: false, why: "너무 김" };
+  const hit = REJECT.find((r) => r.re.test(text));
+  if (hit) return { ok: false, why: hit.why };
+  // 위반은 지자체가 판단 — 시스템이 확정하는 표현은 '의심'으로 바꾼다
+  return { ok: true, text: text.replace(/확인되었습니다|확인됐습니다/g, "의심됩니다").replace(/확인됨/g, "의심됨") };
 }

@@ -9,7 +9,7 @@ import type { AgentLog, AgentName } from "@/types/drone";
 
 export const AGENT_LABEL: Record<AgentName, { label: string; color: string }> = {
   route: { label: "경로 탐색", color: "#5b3fa0" },
-  pathfinder: { label: "선행 유도", color: "#1d4ed8" },
+  pathfinder: { label: "선행 정찰", color: "#1d4ed8" },
   vision: { label: "비전 단속", color: "#c8102e" },
   report: { label: "행정 통보", color: "#1f3a68" },
   watsonx: { label: "watsonx", color: "#1f3a68" },

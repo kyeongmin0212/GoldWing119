@@ -451,7 +451,7 @@ export default function DroneVisionFeed({
         <span className={big ? "text-[18px]" : ""}>드론 실시간 영상{big ? " (상황실 공유)" : ""}</span>
         {drone && launch && (
           <span className="tag text-drone">
-            {drone.assignment.droneId} · {drone.assignment.role === "guide+detect" ? "유도+탐지" : "유도"}
+            {drone.assignment.droneId} · {drone.assignment.role === "guide+detect" ? "정찰+탐지" : "정찰"}
           </span>
         )}
         <div className="ml-auto flex gap-1">
