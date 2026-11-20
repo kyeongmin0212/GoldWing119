@@ -306,6 +306,8 @@ export function useGoldenTimeSim() {
         id: "blockage",
         at: blk.atSec,
         run: () => {
+          // 배속이 빠르면 한 프레임에 몇 초씩 지나가므로, 판단 대기는 발견 시각에 정확히 멈춘다 (드론이 막힌 곳을 지나친 뒤 멈추지 않게)
+          setSimTime(blk.atSec);
           setFocusDrone(blk.droneId);
           addLog("vision", blk.kind === "parking" ? `[${blk.droneId}] 현장 진입로 불법주차 확인 — ${blk.label} · 차량별 통보 초안은 따로 작성` : `[${blk.droneId}] 전방 도로 막힘 확인 — ${blk.label}`, "warn");
           addLog(
