@@ -1,5 +1,6 @@
 // 드론 가상 영상용 항공 장면 — 위에서 내려다본 동네 길 (실제 영상·지도 아님, 코드로 그린 가상 장면)
 // 굽은 2차선 도로, 옆으로 갈라지는 골목, 길가 상가(간판)와 주택(지붕·마당·담장), 뒷줄 주택·빌라·주차장·공원, 나무, 주차 차량, 오가는 차량.
+// 건물·나무는 입체(높이·옆면·창문·지붕·그림자)로 그린다 — 같은 카메라 투영에 높이를 더해 저공 드론 시점처럼 보이게.
 // 같은 seed 면 언제나 같은 동네가 나온다. 세계 좌표 단위: 차로 폭 15 (약 3.5m).
 // 모든 것은 "도로 좌표"(u = 도로 중심에서 옆으로, wy = 도로를 따라 앞으로)로 배치해 굽은 길을 따라 휘어진다.
 // 카메라는 드론 진행 방향이 화면 위쪽이 되도록 돌아가고, 바로 아래가 아니라 앞으로 기울여(원근) 내려다본다.
@@ -13,6 +14,50 @@ const BLOCK = 170;
 
 type Ctx = CanvasRenderingContext2D;
 type P = [number, number];
+/** 도로 좌표 + 높이 (u, wy, z) — z 는 땅에서 위로 (세계 단위) */
+export type V3 = [number, number, number];
+
+/** 해가 있는 쪽 (도로 좌표의 수평 방향, 왼쪽 뒤) — 그림자는 반대쪽(오른쪽 앞)으로 높이의 0.7배 */
+const SUN_U = -0.6;
+const SUN_W = -0.8;
+const SHADOW_U = 0.42;
+const SHADOW_W = 0.56;
+
+const shadeCache = new Map<string, string>();
+/** #rrggbb 색을 f 배 밝기로 (면 음영) */
+function shade(hex: string, f: number): string {
+  const q = Math.round(f * 20) / 20;
+  const key = hex + q;
+  let c = shadeCache.get(key);
+  if (!c) {
+    const n = parseInt(hex.slice(1), 16);
+    const ch = (v: number) => Math.min(255, Math.round(v * q));
+    c = `rgb(${ch((n >> 16) & 255)},${ch((n >> 8) & 255)},${ch(n & 255)})`;
+    shadeCache.set(key, c);
+  }
+  return c;
+}
+
+/** 볼록 껍질 (반시계 방향) — 건물 그림자 모양 */
+function hull(pts: P[]): P[] {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cr = (o: P, a: P, b: P) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: P[] = [];
+  for (const q of p) {
+    while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop();
+    lo.push(q);
+  }
+  const up: P[] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop();
+    up.push(q);
+  }
+  lo.pop();
+  up.pop();
+  return lo.concat(up);
+}
 
 function hash(a: number, b = 0, seed = 0): number {
   let h = (a * 374761393 + b * 668265263 + seed * 1442695041) | 0;
@@ -43,6 +88,14 @@ export interface AerialView {
   screen: (u: number, wy: number) => P;
   /** 그 지점의 배율 (가까울수록 큼) */
   kAt: (u: number, wy: number) => number;
+  /** 높이 z 인 점 → 화면 픽셀 (건물 벽·지붕) */
+  M3: (u: number, wy: number, z: number) => P;
+  /** 높이 z 인 점의 배율 */
+  kAt3: (u: number, wy: number, z: number) => number;
+  /** 도로 좌표 → (옆 l, 드론 바로 아래에서 앞으로 f) */
+  ground: (u: number, wy: number) => P;
+  /** 면(pts)이 카메라 쪽을 보는가 — c: 그 입체의 가운데 */
+  facing: (pts: V3[], c: V3) => boolean;
   /** 화면에 보이는 도로 방향 범위 */
   wyMin: number;
   wyMax: number;
@@ -103,6 +156,11 @@ const HOUSE_ROOF: [string, string][] = [
   ["#8a3b3b", "#a34d4d"],
 ];
 const VILLA_ROOF = ["#e8e4dc", "#d6d9dd", "#ece6da"];
+const SHOP_WALL = ["#e7e1d4", "#d5d8dc", "#c9b8a2", "#efece6", "#b9a48c", "#d8cfc0"];
+const HOUSE_WALL = ["#efe8da", "#e3dccd", "#d9c6ad", "#f2efe8", "#c8b39a"];
+const VILLA_WALL = ["#ece7de", "#d9cbb8", "#b8806a", "#e2e2de", "#c79c84"];
+const GLASS = "#33465a";
+const WINDOW = "#3e5266";
 const CAR = ["#f2f2f0", "#c7cbd0", "#2b2d31", "#7b8088", "#b3262b", "#2f4f8a", "#d8d2c4", "#f2f2f0", "#c7cbd0", "#e9e9e6"];
 
 export function createAerialScene(seed = 1) {
@@ -174,6 +232,41 @@ export function createAerialScene(seed = 1) {
       return [cx + (F * l) / zc, cy + (F * (h * cosT - f * sinT)) / zc];
     };
     const kAt = (u: number, wy: number) => F / zcOf(ground(u, wy)[1]);
+    // 높이 z 인 점: 카메라 높이를 h - z 로 보고 같은 식으로 투영.
+    // 화면 아래 끝 너머(카메라 바로 근처)의 높은 점은 카메라 뒤로 넘어가지 않게 높이를 눌러 둔다 (그곳은 화면 밖)
+    const zEff = (f: number, z: number) => Math.min(z, Math.max(0, h * 0.75 + (f * cosT) / sinT));
+    const zc3 = (f: number, z: number) => Math.max(h * 0.05, f * cosT + (h - zEff(f, z)) * sinT);
+    const M3 = (u: number, wy: number, z: number): P => {
+      const [l, f] = ground(u, wy);
+      const zz = zEff(f, z);
+      const zc = zc3(f, z);
+      return [cx + (F * l) / zc, cy + (F * ((h - zz) * cosT - f * sinT)) / zc];
+    };
+    const kAt3 = (u: number, wy: number, z: number) => F / zc3(ground(u, wy)[1], z);
+    const facing = (pts: V3[], c: V3): boolean => {
+      const [al, af] = ground(pts[0][0], pts[0][1]);
+      const [bl, bf] = ground(pts[1][0], pts[1][1]);
+      const [dl, df] = ground(pts[2][0], pts[2][1]);
+      const e1 = [bl - al, bf - af, pts[1][2] - pts[0][2]];
+      const e2 = [dl - al, df - af, pts[2][2] - pts[0][2]];
+      const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      let mu = 0;
+      let mw = 0;
+      let mz = 0;
+      for (const p of pts) {
+        mu += p[0];
+        mw += p[1];
+        mz += p[2];
+      }
+      mu /= pts.length;
+      mw /= pts.length;
+      mz /= pts.length;
+      const [ml, mf] = ground(mu, mw);
+      const [cl, cf] = ground(c[0], c[1]);
+      const out = n[0] * (ml - cl) + n[1] * (mf - cf) + n[2] * (mz - c[2]);
+      const toCam = n[0] * -ml + n[1] * -mf + n[2] * (h - mz);
+      return out * toCam > 0;
+    };
     // 화면 위·아래 끝에 해당하는 앞 거리 → 그릴 범위
     const fAtRow = (py: number) => {
       const r = (py - cy) / F;
@@ -200,6 +293,10 @@ export function createAerialScene(seed = 1) {
       M,
       screen: M,
       kAt,
+      M3,
+      kAt3,
+      ground,
+      facing,
       wyMin,
       wyMax,
       altM: h / UNITS_PER_M,
@@ -248,13 +345,195 @@ export function createAerialScene(seed = 1) {
       ctx.fillStyle = fill;
       ctx.fill();
     };
-    // 그림자: 해가 왼쪽 위 → 화면 오른쪽 아래로 (회전된 좌표에서 고정 오프셋이면 충분)
-    const shadowQuad = (u0: number, u1: number, y0: number, y1: number, d: number) => {
-      const kk = v.kAt((u0 + u1) / 2, (y0 + y1) / 2);
-      ctx.save();
-      ctx.translate(d * kk * 0.8, d * kk * 0.6);
-      fillQuad(u0, u1, y0, y1, "rgba(18,22,28,0.3)");
-      ctx.restore();
+
+    // ── 입체(건물·나무) 그리기 도구 ──
+    /** 그림자 모양(땅 위, 도로 좌표) — 모아 두었다가 길을 그린 다음 한 번에 칠한다 */
+    const shadowPolys: P[][] = [];
+    /** 입체들 — 길·차 다음에 먼 것부터 그린다 (가까운 건물이 먼 것을 가림) */
+    const solids: { d: number; f: () => void }[] = [];
+    const addSolid = (u: number, wy: number, f: () => void) => {
+      const [sx] = M(u, wy);
+      if (sx < -W * 0.7 || sx > W * 1.7) return;
+      const [l, ff] = v.ground(u, wy);
+      solids.push({ d: l * l + ff * ff, f });
+    };
+    /** 꼭짓점(높이 포함)들이 땅에 드리우는 그림자 */
+    const castShadow = (pts: V3[]) => {
+      const flat: P[] = [];
+      for (const [u, wy, z] of pts) {
+        flat.push([u, wy]);
+        if (z > 0) flat.push([u + SHADOW_U * z, wy + SHADOW_W * z]);
+      }
+      shadowPolys.push(hull(flat));
+    };
+    /** 창문 같은 잔무늬는 가까이(크게) 보일 때만 */
+    const fine = (u: number, wy: number) => v.kAt(u, wy) > 1.05;
+    const path3 = (pts: V3[]) => {
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i++) {
+        const [x, y] = v.M3(pts[i][0], pts[i][1], pts[i][2]);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+    const fill3 = (pts: V3[], color: string) => {
+      path3(pts);
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    /** 벽 바깥 방향이 해를 얼마나 향하는지 → 밝기 */
+    const wallLight = (a: P, b: P, c: V3) => {
+      let nu = b[1] - a[1];
+      let nw = -(b[0] - a[0]);
+      const len = Math.hypot(nu, nw) || 1;
+      if (nu * ((a[0] + b[0]) / 2 - c[0]) + nw * ((a[1] + b[1]) / 2 - c[1]) < 0) {
+        nu = -nu;
+        nw = -nw;
+      }
+      return 0.64 + 0.34 * Math.max(0, (nu * SUN_U + nw * SUN_W) / len);
+    };
+    type Wall = { a: P; b: P; kind: "in" | "out" | "near" | "far"; len: number };
+    /** 벽 위 띠(간판·필로티 등): a→b 밑변의 t0~t1, 높이 z0~z1 */
+    const band = (w: Wall, z0: number, z1: number, color: string, t0 = 0, t1 = 1) => {
+      const at = (t: number, z: number): V3 => [w.a[0] + (w.b[0] - w.a[0]) * t, w.a[1] + (w.b[1] - w.a[1]) * t, z];
+      fill3([at(t0, z0), at(t1, z0), at(t1, z1), at(t0, z1)], color);
+    };
+    /** 벽 위 창문 여러 개를 한 경로로 — rows: 층별 [아래, 위] 높이, cols: 가로 개수 */
+    const panes = (w: Wall, rows: [number, number][], cols: number, color: string, m = 0.08, gap = 0.2) => {
+      ctx.beginPath();
+      const at = (t: number, z: number) => v.M3(w.a[0] + (w.b[0] - w.a[0]) * t, w.a[1] + (w.b[1] - w.a[1]) * t, z);
+      for (const [z0, z1] of rows) {
+        for (let c = 0; c < cols; c++) {
+          const t0 = m + ((1 - 2 * m) * (c + gap)) / cols;
+          const t1 = m + ((1 - 2 * m) * (c + 1 - gap)) / cols;
+          const p0 = at(t0, z0);
+          const p1 = at(t1, z0);
+          const p2 = at(t1, z1);
+          const p3 = at(t0, z1);
+          ctx.moveTo(p0[0], p0[1]);
+          ctx.lineTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+          ctx.lineTo(p3[0], p3[1]);
+          ctx.closePath();
+        }
+      }
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    /** 네 벽 중 a(u0, 도로 쪽)·b(u1, 바깥) 기준 벽 목록 */
+    const wallsOf = (u0: number, u1: number, y0: number, y1: number): Wall[] => [
+      { a: [u0, y0], b: [u0, y1], kind: "in", len: Math.abs(y1 - y0) },
+      { a: [u1, y1], b: [u1, y0], kind: "out", len: Math.abs(y1 - y0) },
+      { a: [u0, y0], b: [u1, y0], kind: "near", len: Math.abs(u1 - u0) },
+      { a: [u1, y1], b: [u0, y1], kind: "far", len: Math.abs(u1 - u0) },
+    ];
+    /** 평지붕 상자 (상가·빌라·옥상 시설). 보이는 벽만 음영 넣어 칠하고 지붕은 맨 나중에 */
+    const drawBox = (u0: number, u1: number, y0: number, y1: number, z0: number, z1: number, wall: string, roof: string, onWall?: (w: Wall) => void, onRoof?: () => void) => {
+      const c: V3 = [(u0 + u1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
+      for (const w of wallsOf(u0, u1, y0, y1)) {
+        const pts: V3[] = [
+          [w.a[0], w.a[1], z0],
+          [w.b[0], w.b[1], z0],
+          [w.b[0], w.b[1], z1],
+          [w.a[0], w.a[1], z1],
+        ];
+        if (!v.facing(pts, c)) continue;
+        fill3(pts, shade(wall, wallLight(w.a, w.b, c)));
+        onWall?.(w);
+      }
+      fill3(
+        [
+          [u0, y0, z1],
+          [u1, y0, z1],
+          [u1, y1, z1],
+          [u0, y1, z1],
+        ],
+        roof,
+      );
+      ctx.strokeStyle = "rgba(0,0,0,0.2)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      onRoof?.();
+    };
+    /** 박공지붕 주택: 벽 높이 zw, 용마루 높이 zr (용마루는 도로와 나란히) */
+    const drawGable = (u0: number, u1: number, y0: number, y1: number, zw: number, zr: number, wall: string, roof: string, onWall?: (w: Wall) => void) => {
+      const um = (u0 + u1) / 2;
+      const c: V3 = [um, (y0 + y1) / 2, zw / 2];
+      for (const w of wallsOf(u0, u1, y0, y1)) {
+        const end = w.kind === "near" || w.kind === "far";
+        const pts: V3[] = end
+          ? [
+              [w.a[0], w.a[1], 0],
+              [w.b[0], w.b[1], 0],
+              [w.b[0], w.b[1], zw],
+              [um, w.a[1], zr],
+              [w.a[0], w.a[1], zw],
+            ]
+          : [
+              [w.a[0], w.a[1], 0],
+              [w.b[0], w.b[1], 0],
+              [w.b[0], w.b[1], zw],
+              [w.a[0], w.a[1], zw],
+            ];
+        if (!v.facing(pts, c)) continue;
+        fill3(pts, shade(wall, wallLight(w.a, w.b, c)));
+        onWall?.(w);
+      }
+      // 처마가 조금 나온 두 지붕면
+      const sg = Math.sign(u1 - u0) || 1;
+      const e = 1.6;
+      const slope = (zr - zw) / Math.abs(um - u0);
+      const ze = zw - e * slope;
+      for (const [ue, lit] of [
+        [u0 - sg * e, sg > 0 ? 1 : 0],
+        [u1 + sg * e, sg > 0 ? 0 : 1],
+      ] as const) {
+        const pts: V3[] = [
+          [ue, y0 - e, ze],
+          [ue, y1 + e, ze],
+          [um, y1 + e, zr],
+          [um, y0 - e, zr],
+        ];
+        if (!v.facing(pts, c)) continue;
+        fill3(pts, shade(roof, lit ? 1 : 0.8));
+        ctx.strokeStyle = "rgba(0,0,0,0.22)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    };
+    /** 나무: 줄기 + 높이 있는 수관(동그란 잎), 그림자는 땅에 */
+    const tree3 = (u: number, wy: number, r: number) => {
+      const zt = 6 + r * 1.3;
+      const su = u + SHADOW_U * zt;
+      const sw = wy + SHADOW_W * zt;
+      const circ: P[] = [];
+      for (let a = 0; a < 10; a++) circ.push([su + r * Math.cos((a / 10) * Math.PI * 2), sw + r * Math.sin((a / 10) * Math.PI * 2)]);
+      shadowPolys.push(circ);
+      addSolid(u, wy, () => {
+        const [bx, by] = M(u, wy);
+        const [x, y] = v.M3(u, wy, zt);
+        const kk = v.kAt3(u, wy, zt);
+        const tr = r * kk;
+        ctx.strokeStyle = "#6b4f36";
+        ctx.lineWidth = Math.max(1, 1.3 * kk);
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.fillStyle = "#3f6a2f";
+        ctx.beginPath();
+        ctx.arc(x, y, tr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#56853f";
+        ctx.beginPath();
+        ctx.arc(x - tr * 0.18, y - tr * 0.2, tr * 0.72, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.14)";
+        ctx.beginPath();
+        ctx.arc(x - tr * 0.35, y - tr * 0.38, tr * 0.36, 0, Math.PI * 2);
+        ctx.fill();
+      });
     };
 
     const pat = asphaltPattern(ctx);
@@ -287,9 +566,7 @@ export function createAerialScene(seed = 1) {
       }
     }
 
-    // 2) 건물·마당·주차장 — 앞줄(도로변)과 뒷줄
-    const shadows: (() => void)[] = [];
-    const bodies: (() => void)[] = [];
+    // 2) 땅(마당·주차장·공원)은 지금 칠하고, 건물·나무(입체)와 그 그림자는 모아 두었다가 길·차 다음에
     for (let i = i0; i <= i1; i++) {
       const alleys = alleysOf(i);
       for (const side of [-1, 1] as const) {
@@ -306,48 +583,85 @@ export function createAerialScene(seed = 1) {
           if (inAlley(side, y0, y1, alleys)) continue;
           const r = hash(id, 40, seed);
           const uIn = side * (ROAD_HALF + SIDEWALK);
+          const ym = (y0 + y1) / 2;
           if (frontKind === "shop") {
+            // 상가: 1~3층 평지붕, 1층 유리창 + 간판 띠, 위층 창문, 옥상 실외기
             const depth = 34 + r * 26;
             const uOut = uIn + side * depth;
+            const floors = 1 + Math.floor(hash(id, 41, seed) * 3);
+            const zt = floors * 13 + 2;
             const roof = SHOP_ROOF[Math.floor(r * SHOP_ROOF.length)];
             const sign = SIGN[Math.floor(hash(id, 50, seed) * SIGN.length)];
-            shadows.push(() => shadowQuad(uIn, uOut, y0, y1, 8));
-            bodies.push(() => {
-              fillQuad(uIn, uOut, y0, y1, roof);
-              ctx.strokeStyle = "rgba(0,0,0,0.16)";
-              ctx.lineWidth = 1;
-              ctx.stroke();
-              // 옥상 실외기·물탱크
+            const wall = SHOP_WALL[Math.floor(hash(id, 42, seed) * SHOP_WALL.length)];
+            castShadow([
+              [uIn, y0, zt],
+              [uOut, y0, zt],
+              [uOut, y1, zt],
+              [uIn, y1, zt],
+            ]);
+            addSolid((uIn + uOut) / 2, ym, () => {
+              const det = fine(uIn, ym);
+              const upper: [number, number][] = [];
+              for (let f = 1; f < floors; f++) upper.push([13 * f + 3.5, 13 * f + 9.5]);
               const um = uIn + side * depth * 0.55;
-              fillQuad(um, um + side * depth * 0.2, y0 + (y1 - y0) * 0.25, y0 + (y1 - y0) * 0.5, "rgba(125,130,136,0.8)");
-              // 도로 쪽 간판·줄무늬 차양
-              fillQuad(uIn, uIn + side * 4.5, y0 + 1, y1 - 1, sign);
-              for (let st = y0 + 2; st < y1 - 2; st += 5) fillQuad(uIn, uIn + side * 4.5, st, st + 2, "rgba(255,255,255,0.5)");
+              drawBox(
+                uIn,
+                uOut,
+                y0,
+                y1,
+                0,
+                zt,
+                wall,
+                roof,
+                (w) => {
+                  if (w.kind === "in") {
+                    if (det) panes(w, [[1.2, 8.8]], Math.max(2, Math.round(w.len / 9)), GLASS, 0.04, 0.05);
+                    band(w, 9.3, 12.5, sign);
+                    if (det) band(w, 10.3, 11.5, "rgba(255,255,255,0.78)", 0.3, 0.7);
+                    if (det && upper.length) panes(w, upper, Math.max(2, Math.floor(w.len / 9)), WINDOW);
+                  } else if (w.kind === "near") {
+                    band(w, 9.3, 12.5, sign, 0, 0.12);
+                    if (det && upper.length) panes(w, upper, Math.max(1, Math.floor(w.len / 12)), WINDOW);
+                  }
+                },
+                () => drawBox(um, um + side * depth * 0.2, y0 + (y1 - y0) * 0.25, y0 + (y1 - y0) * 0.5, zt, zt + 3.5, "#9aa0a6", "#b7bcc1"),
+              );
             });
           } else {
+            // 주택: 마당·담장 + 2층 박공지붕 집
             const setback = 8 + r * 8;
             const depth = 30 + r * 14;
             const hIn = uIn + side * setback;
             const hOut = hIn + side * depth;
             const lotOut = hOut + side * 10;
             const roof = HOUSE_ROOF[Math.floor(hash(id, 60, seed) * HOUSE_ROOF.length)];
-            shadows.push(() => {
-              fillQuad(uIn, lotOut, y0, y1, "#9caf7a");
-              ctx.strokeStyle = "#ddd8cb";
-              ctx.lineWidth = Math.max(1, 1.5 * k);
-              ctx.stroke();
-              shadowQuad(hIn, hOut, y0 + 4, y1 - 4, 6);
+            const wall = HOUSE_WALL[Math.floor(hash(id, 63, seed) * HOUSE_WALL.length)];
+            const zw = 11 + hash(id, 61, seed) * 4;
+            const zr = zw + 6 + hash(id, 62, seed) * 3;
+            const mid = (hIn + hOut) / 2;
+            fillQuad(uIn, lotOut, y0, y1, "#9caf7a");
+            ctx.strokeStyle = "#ddd8cb";
+            ctx.lineWidth = Math.max(1, 1.5 * k);
+            ctx.stroke();
+            castShadow([
+              [hIn, y0 + 4, zw],
+              [hOut, y0 + 4, zw],
+              [hOut, y1 - 4, zw],
+              [hIn, y1 - 4, zw],
+              [mid, y0 + 4, zr],
+              [mid, y1 - 4, zr],
+            ]);
+            addSolid(mid, ym, () => {
+              const det = fine(hIn, ym);
+              drawGable(hIn, hOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
+                if (!det) return;
+                if (w.kind === "in") {
+                  panes(w, [[3.5, 7.5]], 2, WINDOW, 0.12, 0.25);
+                  band(w, 0, 6.5, "#6b4f3a", 0.46, 0.56);
+                } else if (w.kind === "near") panes(w, [[3.5, 7.5]], 1, WINDOW, 0.25, 0.25);
+              });
             });
-            bodies.push(() => {
-              const mid = (hIn + hOut) / 2;
-              fillQuad(hIn, mid, y0 + 4, y1 - 4, roof[0]);
-              fillQuad(mid, hOut, y0 + 4, y1 - 4, roof[1]);
-              quad(hIn, hOut, y0 + 4, y1 - 4);
-              ctx.strokeStyle = "rgba(0,0,0,0.25)";
-              ctx.lineWidth = Math.max(1, 1.1 * k);
-              ctx.stroke();
-              if (r > 0.4) tree(ctx, M, v.kAt, uIn + side * (setback * 0.45), y0 + (y1 - y0) * (0.3 + 0.4 * hash(id, 70, seed)), 5 + r * 3);
-            });
+            if (r > 0.4) tree3(uIn + side * (setback * 0.45), y0 + (y1 - y0) * (0.3 + 0.4 * hash(id, 70, seed)), 5 + r * 3);
           }
           // 뒷줄: 주택 / 빌라 / 주차장 / 공원
           const backIn = side * (ROAD_HALF + SIDEWALK + 72);
@@ -355,44 +669,75 @@ export function createAerialScene(seed = 1) {
           const bOut = backIn + side * (48 + hash(id, 81, seed) * 30);
           if (backKind < 0.45) {
             const roof = HOUSE_ROOF[Math.floor(hash(id, 82, seed) * HOUSE_ROOF.length)];
-            shadows.push(() => {
-              fillQuad(backIn, bOut + side * 8, y0, y1, "#a3b384");
-              shadowQuad(backIn + side * 6, bOut, y0 + 4, y1 - 4, 6);
-            });
-            bodies.push(() => {
-              const mid = (backIn + side * 6 + bOut) / 2;
-              fillQuad(backIn + side * 6, mid, y0 + 4, y1 - 4, roof[0]);
-              fillQuad(mid, bOut, y0 + 4, y1 - 4, roof[1]);
+            const wall = HOUSE_WALL[Math.floor(hash(id, 84, seed) * HOUSE_WALL.length)];
+            const hIn = backIn + side * 6;
+            const zw = 10 + hash(id, 85, seed) * 4;
+            const zr = zw + 6 + hash(id, 86, seed) * 3;
+            const mid = (hIn + bOut) / 2;
+            fillQuad(backIn, bOut + side * 8, y0, y1, "#a3b384");
+            castShadow([
+              [hIn, y0 + 4, zw],
+              [bOut, y0 + 4, zw],
+              [bOut, y1 - 4, zw],
+              [hIn, y1 - 4, zw],
+              [mid, y0 + 4, zr],
+              [mid, y1 - 4, zr],
+            ]);
+            addSolid(mid, ym, () => {
+              const det = fine(hIn, ym);
+              drawGable(hIn, bOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
+                if (det && (w.kind === "in" || w.kind === "near")) panes(w, [[3.5, 7.5]], w.kind === "in" ? 2 : 1, WINDOW, 0.15, 0.25);
+              });
             });
           } else if (backKind < 0.75) {
-            shadows.push(() => shadowQuad(backIn, bOut, y0, y1, 12));
-            bodies.push(() => {
-              fillQuad(backIn, bOut, y0, y1, VILLA_ROOF[Math.floor(hash(id, 83, seed) * VILLA_ROOF.length)]);
-              ctx.strokeStyle = "rgba(0,0,0,0.18)";
-              ctx.lineWidth = 1;
-              ctx.stroke();
+            // 빌라: 3~4층, 1층 필로티(주차), 층마다 창문·베란다, 옥상 계단실
+            const floors = 3 + (hash(id, 87, seed) < 0.4 ? 1 : 0);
+            const zt = floors * 11 + 2;
+            const wall = VILLA_WALL[Math.floor(hash(id, 88, seed) * VILLA_WALL.length)];
+            const roof = VILLA_ROOF[Math.floor(hash(id, 83, seed) * VILLA_ROOF.length)];
+            castShadow([
+              [backIn, y0, zt],
+              [bOut, y0, zt],
+              [bOut, y1, zt],
+              [backIn, y1, zt],
+            ]);
+            addSolid((backIn + bOut) / 2, ym, () => {
+              const det = fine(backIn, ym);
+              const rows: [number, number][] = [];
+              for (let f = 1; f < floors; f++) rows.push([11 * f + 3, 11 * f + 8.5]);
               const um = (backIn + bOut) / 2;
-              fillQuad(um, um + side * 8, y0 + (y1 - y0) * 0.3, y0 + (y1 - y0) * 0.55, "#7f8b98");
+              drawBox(
+                backIn,
+                bOut,
+                y0,
+                y1,
+                0,
+                zt,
+                wall,
+                roof,
+                (w) => {
+                  if (w.kind !== "in" && w.kind !== "near") return;
+                  if (w.kind === "in") band(w, 0, 8.5, "#4a4f57", 0.06, 0.94);
+                  if (!det) return;
+                  panes(w, rows, Math.max(2, Math.floor(w.len / 11)), WINDOW, 0.08, 0.18);
+                  if (w.kind === "in") for (const [z0] of rows) band(w, z0 - 1.6, z0 - 0.4, "rgba(255,255,255,0.35)", 0.04, 0.96);
+                },
+                () => drawBox(um, um + side * 10, y0 + (y1 - y0) * 0.3, y0 + (y1 - y0) * 0.55, zt, zt + 7, wall, "#7f8b98"),
+              );
             });
           } else if (backKind < 0.9) {
-            bodies.push(() => {
-              fillQuad(backIn, bOut, y0, y1, pat);
-              for (let py = y0 + 3; py < y1 - 10; py += 12) {
-                if (hash(Math.round(py), id, seed) < 0.35) continue;
-                v.car(ctx, (backIn + bOut) / 2, py + 5, Math.PI / 2, CAR[Math.floor(hash(Math.round(py), id + 1, seed) * CAR.length)]);
-              }
-            });
+            fillQuad(backIn, bOut, y0, y1, pat);
+            for (let py = y0 + 3; py < y1 - 10; py += 12) {
+              if (hash(Math.round(py), id, seed) < 0.35) continue;
+              v.car(ctx, (backIn + bOut) / 2, py + 5, Math.PI / 2, CAR[Math.floor(hash(Math.round(py), id + 1, seed) * CAR.length)]);
+            }
           } else {
-            bodies.push(() => {
-              fillQuad(backIn, bOut, y0, y1, "#8fae6c");
-              tree(ctx, M, v.kAt, (backIn + bOut) / 2, (y0 + y1) / 2, 9);
-            });
+            fillQuad(backIn, bOut, y0, y1, "#8fae6c");
+            tree3((backIn + bOut) / 2, ym, 9);
           }
         }
       }
     }
-    shadows.forEach((f) => f());
-    bodies.forEach((f) => f());
 
     // 3) 큰길: 경계석(보도) → 아스팔트 → 차선
     const strip = (half: number, fill: string | CanvasPattern) => {
@@ -440,6 +785,19 @@ export function createAerialScene(seed = 1) {
       }
     }
 
+    // 건물·나무 그림자 — 한 경로로 모아 칠해 겹친 곳도 같은 진하기 (왼쪽 건물 그림자는 보도·차도에 걸친다)
+    ctx.beginPath();
+    for (const poly of shadowPolys) {
+      for (let j = 0; j < poly.length; j++) {
+        const [x, yy] = M(poly[j][0], poly[j][1]);
+        if (j === 0) ctx.moveTo(x, yy);
+        else ctx.lineTo(x, yy);
+      }
+      ctx.closePath();
+    }
+    ctx.fillStyle = "rgba(18,22,28,0.28)";
+    ctx.fill();
+
     // 4) 길가 주차 차량
     for (let i = i0; i <= i1; i++) {
       const alleys = alleysOf(i);
@@ -469,29 +827,16 @@ export function createAerialScene(seed = 1) {
         v.car(ctx, u, wy, lane > 0 ? yieldAmt * 0.06 : 0, CAR[Math.floor(hash(q, lane + 102, seed) * CAR.length)], lane > 0 ? 0 : Math.PI, { plate: fakePlate(q * 3 + lane + seed * 500) });
       }
     }
+
+    // 6) 입체 건물·나무 — 먼 것부터 (화가 알고리즘). 건물은 길 바깥으로 기울어 보여 길 위 차는 가리지 않고,
+    //    굽은 길 저 앞쪽만 가까운 건물 뒤로 숨는다
+    solids.sort((a, b) => b.d - a.d);
+    for (const s of solids) s.f();
     ctx.restore();
     return v;
   }
 
   return { draw, frame, view: makeView, world };
-}
-
-function tree(ctx: Ctx, M: (u: number, wy: number) => P, kAt: (u: number, wy: number) => number, u: number, wy: number, r: number): void {
-  const [x, y] = M(u, wy);
-  const k = kAt(u, wy);
-  const tr = r * k;
-  ctx.fillStyle = "rgba(20,30,20,0.3)";
-  ctx.beginPath();
-  ctx.arc(x + 3.5 * k, y + 4.5 * k, tr, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#4b7637";
-  ctx.beginPath();
-  ctx.arc(x, y, tr, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.13)";
-  ctx.beginPath();
-  ctx.arc(x - tr * 0.3, y - tr * 0.3, tr * 0.45, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 /** 위에서 본 차량 — 그림자·차체·앞뒤 유리·지붕 반사. (x,y): 그리기 좌표 중심, k: 배율, 0도 = 위쪽을 향함 */
