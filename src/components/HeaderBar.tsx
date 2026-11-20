@@ -109,7 +109,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
           <label className="flex items-center gap-1 text-[12px] text-muted">
             배속
             <select value={speed} onChange={(e) => sim.setSpeed(Number(e.target.value))} className="h-[34px] border border-line-strong bg-white px-1.5 text-[13px] text-text" aria-label="재생 배속">
-              {[10, 20, 30, 60].map((s) => (
+              {[5, 10, 20, 30, 60].map((s) => (
                 <option key={s} value={s}>
                   ×{s}
                 </option>

@@ -63,8 +63,8 @@ export function useGoldenTimeSim() {
   const plan = useMemo(() => buildSimPlan(scenario, decision, launch !== false, routeChoice), [scenario, decision, launch, routeChoice]);
 
   const [status, setStatus] = useState<SimStatus>("idle");
-  // 기본 재생 배속 ×10 (×30 은 드론 영상이 너무 빠르게 흐름)
-  const [speed, setSpeed] = useState(10);
+  // 기본 재생 배속 ×5 (빠르면 드론 영상이 너무 빠르게 흐름 — 영상·지도·소방차가 같이 느려짐)
+  const [speed, setSpeed] = useState(5);
   const [simTime, setSimTime] = useState(0);
   const [violations, setViolations] = useState<ViolationRecord[]>([]);
   const violationsRef = useRef<ViolationRecord[]>([]);
