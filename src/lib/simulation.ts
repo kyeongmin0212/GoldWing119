@@ -193,6 +193,31 @@ function trimAt(d: DroneSim, t: number): DroneSim {
   return { ...d, points, times, totalSec: t };
 }
 
+/**
+ * 우회 승인 뒤: 지금 위치에서 왔던 길(기존 경로)을 따라 갈림길까지 되돌아간 다음, 우회로를 따라 합류 지점까지 앞서 확인.
+ * 되돌아가는 동안과 우회로 모두 같은 속도로 멈춤 없이 난다 (건물 위로 가로지르지 않음).
+ */
+function backtrackToDetour(d: DroneSim, base: ScenarioRoute, route: ScenarioRoute, from: number, rejoin: number): void {
+  const b = base.road;
+  const here = d.points[d.points.length - 1];
+  const fJ = b.fr[from];
+  // 기존 경로 위 지금 위치(비율) — 갈림길 뒤쪽에서 촘촘히 찾아 가장 가까운 곳
+  let fHere = fJ;
+  let best = Infinity;
+  for (let k = 0; k <= 400; k++) {
+    const f = fJ + ((1 - fJ) * k) / 400;
+    const dd = distLatLng(here, toLatLng(b.tools.at(f)));
+    if (dd < best) {
+      best = dd;
+      fHere = f;
+    }
+  }
+  const back = b.tools.sub(fJ, fHere).reverse(); // 지금 위치 → 갈림길
+  extend(d.points, d.times, back.slice(1).map(toLatLng), SCAN_SPEED_KMH);
+  const r = route.road;
+  extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).slice(1).map(toLatLng), SCAN_SPEED_KMH);
+}
+
 function finish(d: DroneSim): DroneSim {
   return { ...d, totalSec: d.times[d.times.length - 1] };
 }
@@ -277,12 +302,10 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
   for (const a of assignments) {
     if (scout && a === inA) {
       if (blockage && choice === "detour") {
-        // 우회 승인: 발견 지점에서 우회로 시작점으로 가서, 소방차가 갈 우회로를 앞서 비행하며 길 확인
+        // 우회 승인: 발견 지점에서 왔던 길로 갈림길까지 되돌아가, 소방차가 갈 우회로를 앞서 비행하며 길 확인
         const d = trimAt(scout, blockage.atSec);
-        const r = route.road;
         const from = bl!.detour.fromSeg;
-        const rejoin = from + bl!.detour.segments.length;
-        extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), SCAN_SPEED_KMH);
+        backtrackToDetour(d, pending.route, route, from, from + bl!.detour.segments.length);
         drones.push(finish(d));
       } else {
         // 기존 경로 유지(또는 판단 전): 정찰을 이어 가며 막힌 구간·주차 차량 확인
@@ -293,11 +316,9 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     if (scout && a === scoutA) {
       const d: DroneSim = { ...scout, points: [...scout.points], times: [...scout.times] };
       if (blockage && choice === "detour") {
-        // 우회로를 앞서 비행하며 확인 (갈림길 → 우회로 → 합류 지점)
-        const r = route.road;
+        // 왔던 길로 갈림길까지 되돌아가 우회로를 앞서 비행하며 확인 (발견 지점 → 갈림길 → 우회로 → 합류 지점)
         const from = bl!.detour.fromSeg;
-        const rejoin = from + bl!.detour.segments.length;
-        extend(d.points, d.times, r.tools.sub(r.fr[from], r.fr[rejoin]).map(toLatLng), SCAN_SPEED_KMH);
+        backtrackToDetour(d, pending.route, route, from, from + bl!.detour.segments.length);
       } else if (blockage && choice === "stay") {
         // 막힌 구간을 따라가며 확인
         const r = route.road;

@@ -73,9 +73,9 @@ function alongRoad(p: LatLng, pts: LatLng[], cum: number[]): { along: number; di
 }
 
 /** 영상 속 길 방향 표: 도로 선을 따라 2m 마다 진행 방향(위쪽 0, 오른쪽 +).
- *  지도 선의 잔 꺾임은 앞뒤 40m 평균으로 펴서, 교차로 좌회전·우회전은 부드럽게 도는 길로 보이게 한다. */
+ *  앞뒤 12m 만 평균 — 길은 곧게 가다가 교차로에서만 짧게 돈다 (넓게 펴면 화면 전체 길이 바나나처럼 휘어 보임). */
 const PATH_STEP_M = 2;
-const PATH_SMOOTH_M = 40;
+const PATH_SMOOTH_M = 12;
 function headingTable(pts: LatLng[], cum: number[]): number[] {
   const total = cum[cum.length - 1] || 0;
   if (pts.length < 2 || total <= 0) return [];
@@ -197,8 +197,9 @@ export default function DroneVisionFeed({
     let raf = 0;
     let last = performance.now();
     let alongDisp = 0;
-    let turnDisp = 0;
     let turnTarget = 0;
+    /** 화면에 보이는 카메라 방향(세계 기준) — 뒤돌기·갈림길에서 끊기지 않고 이어서 돈다 */
+    let camDisp: number | null = null;
     let yieldAmt = 0;
     let zoom = 1;
     let scene = createAerialScene(3);
@@ -303,12 +304,21 @@ export default function DroneVisionFeed({
         if (ahead < target - 0.5) turnTarget = Math.PI;
         else if (ahead > target + 0.5) turnTarget = 0;
       } else turnTarget = 0;
-      const dTurn = turnTarget - turnDisp;
-      turnDisp += Math.sign(dTurn) * Math.min(Math.abs(dTurn), dt * 2.2);
       if (!flying || Math.abs(target - alongDisp) > 400) alongDisp = target;
       else alongDisp += (target - alongDisp) * Math.min(1, dt * 3);
       const droneAlong = alongDisp;
       const s = 2000 + droneAlong * UPM;
+      // 카메라 방향: 가는 쪽 길 방향(되돌아갈 때는 뒤쪽 길 방향 + 180°)을 따라간다.
+      // 크게 돌 때(뒤돌기)는 일정한 속도로 돌고, 길 굽이는 바로 따라간다. 늘 짧은 쪽으로 돈다.
+      const back = turnTarget > 1 ? -1 : 1;
+      const camWant = 0.75 * scene.frame(s + 30 * back).angle + 0.25 * scene.frame(s + 90 * back).angle + (back < 0 ? Math.PI : 0);
+      if (camDisp === null || !flying) camDisp = camWant;
+      else {
+        let diff = camWant - camDisp;
+        diff -= 2 * Math.PI * Math.round(diff / (2 * Math.PI));
+        if (Math.abs(diff) > 1) camDisp += Math.sign(diff) * Math.min(Math.abs(diff), dt * 1.8);
+        else camDisp += diff * Math.min(1, dt * 6);
+      }
       // 순항 때는 조금 높이(넓게), 정찰 때는 낮게 — 카메라 각도는 같음
       zoom += ((st.phase === "transit" ? 0.8 : 1) - zoom) * Math.min(1, dt * 3);
       yieldAmt += ((st.yielding ? 1 : 0) - yieldAmt) * Math.min(1, dt * 1.5);
@@ -325,7 +335,7 @@ export default function DroneVisionFeed({
       const keepClearWy = scanning
         ? [...parkedAt, st.blockage?.kind === "parking" ? blockAt : null].filter((x): x is number => x !== null)
         : [];
-      const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy, turn: turnDisp });
+      const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy, camAngle: camDisp });
       // 먼 곳은 옅은 안개 (기울인 카메라의 원근감)
       const haze = ctx.createLinearGradient(0, 0, 0, H * 0.32);
       haze.addColorStop(0, "rgba(214,219,226,0.62)");

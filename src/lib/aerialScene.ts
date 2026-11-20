@@ -11,6 +11,8 @@ export const LANE = 15;
 export const ROAD_HALF = LANE * 2;
 const SIDEWALK = 10;
 const BLOCK = 170;
+/** 길가 건물 줄의 가장 바깥 (뒷줄 끝) */
+const BACK_U = ROAD_HALF + SIDEWALK + 150;
 
 type Ctx = CanvasRenderingContext2D;
 type P = [number, number];
@@ -145,6 +147,8 @@ export interface AerialDrawOpts {
   keepClearWy?: number[];
   /** 카메라가 길 방향에서 더 돌아간 각(라디안). 0 = 앞(길이 이어지는 쪽), π = 뒤돌아봄(왔던 길로 되돌아갈 때) */
   turn?: number;
+  /** 카메라 방향을 직접 정할 때(세계 기준 라디안) — 주면 turn 대신 쓴다. 뒤돌기·갈림길에서 끊김 없이 돌게 하려고 */
+  camAngle?: number;
 }
 
 const SHOP_ROOF = ["#d9d6cf", "#c9ccd1", "#e4e0d6", "#b9bdc2", "#d3cbbd", "#cfc7b8"];
@@ -219,6 +223,13 @@ export function createAerialScene(seed = 1) {
     const d = t * step;
     return [px[i] + d * Math.sin(am), py[i] + d * Math.cos(am), a0 + (a1 - a0) * t, kap];
   };
+  /** wy0~wy1 구간에서 가장 급하게 꺾이는 정도(라디안/단위) — 교차로에서 도는 곳 찾기 */
+  const bendAt = (wy0: number, wy1: number): number => {
+    if (!path) return 0;
+    let m = 0;
+    for (let y = wy0; y <= wy1; y += 8) m = Math.max(m, Math.abs(center(y)[3]));
+    return m;
+  };
   const frame = (wy: number): RoadFrame => {
     const [cx, , angle] = center(wy);
     return { cx, angle };
@@ -256,22 +267,25 @@ export function createAerialScene(seed = 1) {
    * 기울인 카메라(핀홀) 투영. 순항·정찰 모두 앞으로 기울인 같은 각도(수평에서 약 42° 아래)로 본다.
    * zoom 1 = 정찰(낮게), 작을수록 높이 떠서 넓게 본다. 화면 가운데(cy)에 드론 위치(s)가 오고, 화면 위쪽일수록 앞쪽 먼 곳이 작게 보인다.
    */
-  function makeView(W: number, H: number, s: number, zoom: number, turn = 0): AerialView {
+  function makeView(W: number, H: number, s: number, zoom: number, turn = 0, camAbs?: number): AerialView {
+    // 카메라 방향을 직접 받으면, 그 지점 길 방향과의 차이를 turn 으로 본다 (그릴 범위 앞/뒤 판단용)
+    if (camAbs !== undefined) turn = camAbs - center(s)[2];
     const kc = (W / 340) * zoom * 2.3; // 화면 가운데 배율
     const theta = 0.74; // 광축이 수평에서 내려간 각 (라디안, 약 42°) — 순항 때도 바로 아래가 아니라 앞을 본다
-    // 초점 거리(픽셀) — 너무 짧으면(광각) 길이 화면 위로 갈수록 V자로 급하게 좁아 보여서 조금 길게
-    const F = 1.0 * W;
+    // 초점 거리(픽셀) — 너무 짧으면(광각) 길이 화면 위로 갈수록 V자로 급하게 좁아 보이고,
+    // 너무 길면 앞이 덜 보여 25m 앞에 멈췄을 때 막힌 현장이 화면 위로 잘린다 → 그 사이 값
+    const F = 0.85 * W;
     const h = (F * Math.sin(theta)) / kc; // 카메라 높이(세계 단위)
     const cosT = Math.cos(theta);
     const sinT = Math.sin(theta);
     const lookAhead = h / Math.tan(theta); // 바로 아래 지점에서 화면 가운데 지점까지
     const cx = W / 2;
-    const cy = H * 0.66; // 화면 가운데보다 조금 아래 — 앞쪽을 더 넓게 본다
+    const cy = H * 0.78; // 드론 위치를 화면 아래쪽에 — 앞쪽을 넓게 본다 (정찰 때 앞 약 50m)
     // 화면 가운데 지점과 카메라 방향 — 카메라는 조금 앞쪽 길 방향을 보며 돌아간다 (꺾이는 곳에서 미리 돈다)
     const [camX, camY] = path ? center(s) : [roadX(s + 25), s];
     // 되돌아가는 중(turn > 90°)이면 뒤쪽 길 방향을 미리 본다
     const back = Math.cos(turn) < 0 ? -1 : 1;
-    const camAngle = 0.75 * center(s + 30 * back)[2] + 0.25 * center(s + 90 * back)[2] + turn;
+    const camAngle = camAbs ?? 0.75 * center(s + 30 * back)[2] + 0.25 * center(s + 90 * back)[2] + turn;
     const c = Math.cos(-camAngle);
     const sn = Math.sin(-camAngle);
     /** 도로 좌표 → (옆 l, 바로 아래 지점에서 앞으로 f) */
@@ -381,7 +395,7 @@ export function createAerialScene(seed = 1) {
   }
 
   function draw(ctx: Ctx, W: number, H: number, o: AerialDrawOpts): AerialView {
-    const v = makeView(W, H, o.s, o.zoom, o.turn ?? 0);
+    const v = makeView(W, H, o.s, o.zoom, o.turn ?? 0, o.camAngle);
     const { k, M } = v;
     const yLo = v.wyMin;
     const yHi = v.wyMax;
@@ -609,6 +623,7 @@ export function createAerialScene(seed = 1) {
     // 1) 골목 (아스팔트 띠)
     for (let i = i0; i <= i1; i++) {
       for (const a of alleysOf(i)) {
+        if (bendAt(a.wy - a.w, a.wy + a.w) * 420 > 0.35) continue;
         const u0 = a.side * (ROAD_HALF - 1);
         const u1 = a.side * 420;
         const steps = 30;
@@ -645,6 +660,18 @@ export function createAerialScene(seed = 1) {
           y += len;
           n++;
           if (inAlley(side, y0, y1, alleys)) continue;
+          // 교차로에서 도는 곳은 건물 대신 모퉁이 공원(잔디·나무) — 길을 따라 놓은 건물은 바깥쪽이 부채꼴로 늘어나고
+          // 안쪽은 접혀 보이지만, 평평한 잔디와 둥근 나무는 꺾여도 어색하지 않다
+          if (bendAt(y0 - 20, y1 + 20) * BACK_U > 0.35) {
+            fillQuad(side * (ROAD_HALF + SIDEWALK), side * (BACK_U + 220), y0 - 2, y1 + 2, "#9caf7a");
+            const kap = center((y0 + y1) / 2)[3];
+            for (let q = 0; q < 4; q++) {
+              const tu = side * (ROAD_HALF + SIDEWALK + 12 + q * 38 + hash(id, 140 + q, seed) * 14);
+              if (tu * kap > 0.6) continue; // 안쪽 모퉁이 깊은 곳은 눌려 있어 나무가 겹친다
+              tree3(tu, y0 + (y1 - y0) * (0.2 + 0.6 * hash(id, 150 + q, seed)), 6 + hash(id, 160 + q, seed) * 4);
+            }
+            continue;
+          }
           const r = hash(id, 40, seed);
           const uIn = side * (ROAD_HALF + SIDEWALK);
           const ym = (y0 + y1) / 2;
