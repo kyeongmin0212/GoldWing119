@@ -139,7 +139,7 @@ export interface AerialDrawOpts {
   t: number;
   /** 0~1: 길터주기 방송으로 같은 방향 차량이 가장자리로 비켜선 정도 */
   yieldAmt?: number;
-  /** 막힌 지점(사고) — 이 근처 같은 방향 차로에는 달리는 차를 두지 않는다 */
+  /** 막힌 지점(도로 공사) — 이 근처 같은 방향 차로에는 달리는 차를 두지 않는다 */
   blockWy?: number;
   /** 진로방해 차량 자리 — 이 근처 오른쪽 길가에는 다른 주차 차량을 두지 않는다 */
   keepClearWy?: number[];

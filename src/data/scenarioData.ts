@@ -68,7 +68,7 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
   regional: {
     mode: "regional",
     title: "시나리오 1 · 도로 막힘 → 더 빠른 길 안내 — 양동 → 남구 방림동 주택 화재 (퇴근길)",
-    description: "광주천 천변좌로 퇴근길 정체 구간, 드론이 앞서 정찰하다 추돌사고로 길이 막힌 것을 발견",
+    description: "광주천 천변좌로 퇴근길 정체 구간, 드론이 앞서 정찰하다 도로 공사로 차로가 막힌 것을 발견",
     focus: "처음 안내한 천변좌로 대신 더 빠른 길(방림로·용대로)로 소방차 안내",
     station: { ...STATION, position: { lat: 35.15194, lng: 126.90359 } },
     incident: {
@@ -87,11 +87,11 @@ export const SCENARIOS: Record<ScenarioMode, Scenario> = {
     ],
     // 혼잡 DB 에 없는 돌발 상황 — 선행 드론이 경로를 따라 정찰하다 발견 → 관제요원이 우회로 안내 여부 판단
     blockage: {
-      kind: "accident",
+      kind: "roadwork",
       segIndex: 2,
       position: { lat: 35.13361, lng: 126.92344 },
-      label: "천변좌로 추돌사고 — 차로 차단 (가상)",
-      short: "사고 · 차로 차단",
+      label: "천변좌로 긴급 도로 공사 — 차로 통제 (가상)",
+      short: "도로 공사 · 차로 통제",
       blockedSpeedKmh: 4,
       detour: {
         fromSeg: 2,

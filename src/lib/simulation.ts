@@ -36,8 +36,8 @@ export interface DroneSim {
 }
 
 export interface BlockageInfo {
-  /** accident: 도로 막힘(사고 등) / parking: 불법주차로 진입 곤란 */
-  kind: "accident" | "parking";
+  /** roadwork: 도로 공사로 차로 통제 / parking: 불법주차로 진입 곤란 */
+  kind: "roadwork" | "parking";
   /** 지도·영상 표식용 짧은 이름 */
   short: string;
   droneId: string;
@@ -248,7 +248,7 @@ export function buildSimPlan(sc: Scenario, decision: DispatchDecision | null, la
     scout.aheadSec = scout.times[scout.times.length - 1];
     const pts = scout.points;
     const ts = scout.times;
-    // 차단 지점 25m 앞에서 멈춰 발견 — 앞을 비스듬히 보는 카메라 화면 위쪽에 사고 현장이 보이도록
+    // 차단 지점 25m 앞에서 멈춰 발견 — 앞을 비스듬히 보는 카메라 화면 위쪽에 막힌 현장이 보이도록
     const fStop = Math.max(road.fr[lastVertex], fB - 0.025 / road.tools.km);
     extend(pts, ts, road.tools.sub(road.fr[lastVertex], fStop).slice(1).map(toLatLng), DRONE_SPEED_KMH);
     scout = finish(scout);

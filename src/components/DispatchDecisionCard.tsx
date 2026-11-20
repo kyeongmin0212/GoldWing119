@@ -22,6 +22,25 @@ export default function DispatchDecisionCard({ sim }: { sim: SimController }) {
         {!awaiting && <span className={`tag ${launch ? "text-drone" : "text-muted"}`}>{launch ? `드론 ${n}대 출동` : "소방차만 출동"}</span>}
       </div>
       <div className="p-3">
+        {/* 승인 버튼은 카드 맨 위 — 노트북 화면에서도 스크롤 없이 보이게 (우회로 카드와 같은 배치) */}
+        {awaiting && (
+          <div className="mb-3 flex gap-2">
+            {n > 0 ? (
+              <>
+                <button className="btn btn-primary flex-1" onClick={() => sim.confirmDispatch(true)}>
+                  드론 투입 승인 ({n}대)
+                </button>
+                <button className="btn" onClick={() => sim.confirmDispatch(false)}>
+                  소방차만 출동
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-primary flex-1" onClick={() => sim.confirmDispatch(false)}>
+                확인 — 소방차만 출동
+              </button>
+            )}
+          </div>
+        )}
         <table className="kv">
           <tbody>
             <tr>
@@ -62,24 +81,6 @@ export default function DispatchDecisionCard({ sim }: { sim: SimController }) {
             )}
           </tbody>
         </table>
-        {awaiting && (
-          <div className="mt-3 flex gap-2">
-            {n > 0 ? (
-              <>
-                <button className="btn btn-primary flex-1" onClick={() => sim.confirmDispatch(true)}>
-                  드론 투입 승인 ({n}대)
-                </button>
-                <button className="btn" onClick={() => sim.confirmDispatch(false)}>
-                  소방차만 출동
-                </button>
-              </>
-            ) : (
-              <button className="btn btn-primary flex-1" onClick={() => sim.confirmDispatch(false)}>
-                확인 — 소방차만 출동
-              </button>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

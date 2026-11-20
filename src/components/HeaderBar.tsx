@@ -120,7 +120,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
           ["투입 드론", `${activeDrones}대`],
           ["거점 대기 드론", `${DRONE_POOL_TOTAL - activeDrones} / ${DRONE_POOL_TOTAL}대 (시범 ${DRONE_BASES.length}거점)`],
           ["통보 초안", violations.length ? `탐지 ${violations.length}대 · 초안 ${drafted}건${failed ? ` · 실패 ${failed}건` : ""}` : "0건"],
-          ["소방차 도착 예정", status === "idle" ? "—" : `T+${formatClock(plan.truck.totalSec)}${status === "rerouting" ? " (경로 선택 대기 · 사고 반영 전)" : launch === false ? " (드론 미투입)" : ""}`],
+          ["소방차 도착 예정", status === "idle" ? "—" : `T+${formatClock(plan.truck.totalSec)}${status === "rerouting" ? " (경로 선택 대기 · 막힘 반영 전)" : launch === false ? " (드론 미투입)" : ""}`],
         ].map(([k, v]) => (
           <div key={k} className="border-r border-line px-4 py-2 last:border-r-0">
             <div className="text-[11px] text-muted">{k}</div>

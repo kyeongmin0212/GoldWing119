@@ -284,7 +284,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
           <div className="border border-line bg-white/95 px-2.5 py-1.5">
             <span className="text-muted">소방차 현장 도착 예정 </span>
             <b className="font-mono">T+{formatClock(plan.truck.totalSec)}</b>
-            <span className="text-faint"> {status === "rerouting" ? "(경로 선택 대기 · 사고 반영 전)" : `(평시 ${formatClock(decision.normalSec)})`}</span>
+            <span className="text-faint"> {status === "rerouting" ? "(경로 선택 대기 · 막힘 반영 전)" : `(평시 ${formatClock(decision.normalSec)})`}</span>
           </div>
           {launch &&
             plan.drones.map((d) => (

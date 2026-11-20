@@ -73,9 +73,9 @@ export interface ViolationSample {
   confidence: number;
 }
 
-/** 드론 정찰로 발견하는 전방 막힘 — accident: 도로 막힘(사고 등 돌발), parking: 불법주차로 소방차 진입 곤란 */
+/** 드론 정찰로 발견하는 전방 막힘 — roadwork: 도로 공사로 차로 통제, parking: 불법주차로 소방차 진입 곤란 */
 export interface RoadBlockage {
-  kind: "accident" | "parking";
+  kind: "roadwork" | "parking";
   /** 막힌 지점이 있는 구간 (기존 경로 기준 인덱스) */
   segIndex: number;
   position: LatLng;

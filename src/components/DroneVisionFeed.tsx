@@ -2,7 +2,7 @@
 
 // 선행 드론 실시간 영상(앞으로 기울인 카메라, 정찰 고도 약 18m) 시뮬레이터 — 바운딩 박스, 번호판 OCR
 // 바탕은 코드로 그린 가상 동네 장면(굽은 길·골목·상가·주택, src/lib/aerialScene.ts) — 실제 영상·지도 아님, 인터넷 불필요.
-// 그 위에 시뮬레이션 위치에 맞춰 진로방해 차량·막힌 지점(사고/불법주차)·소방차를 그린다.
+// 그 위에 시뮬레이션 위치에 맞춰 진로방해 차량·막힌 지점(도로 공사/불법주차)·소방차를 그린다.
 // 위치는 "소방차 경로를 따라 드론에서 몇 m 앞/뒤인가"로 가상 장면에 옮긴다.
 // 상황실 콘솔과 소방차 태블릿(보기 전용, 큰 글씨)이 같이 쓴다. 드론은 상황실 원격 조종자(사람)가 조종한다.
 
@@ -34,7 +34,7 @@ interface FrameState {
   truck: TruckTimeline;
   truckOn: boolean;
   parked: { sample: ViolationSample; record?: ViolationRecord }[];
-  blockage: { pos: LatLng; kind: "accident" | "parking"; short: string } | null;
+  blockage: { pos: LatLng; kind: "roadwork" | "parking"; short: string } | null;
   /** 길터주기 방송 중 — 같은 방향 차량이 가장자리로 비켜섬 */
   yielding: boolean;
   seed: number;
@@ -320,7 +320,7 @@ export default function DroneVisionFeed({
         return r.dist < 40 ? toWy(r.along) : null;
       };
       const blockAt = st.blockage ? onRoute(st.blockage.pos) : null;
-      const blockWy = scanning && st.blockage?.kind === "accident" && blockAt !== null ? blockAt : undefined;
+      const blockWy = scanning && st.blockage?.kind === "roadwork" && blockAt !== null ? blockAt : undefined;
       const parkedAt = st.parked.map((pk) => onRoute(pk.sample.position));
       const keepClearWy = scanning
         ? [...parkedAt, st.blockage?.kind === "parking" ? blockAt : null].filter((x): x is number => x !== null)
@@ -347,28 +347,57 @@ export default function DroneVisionFeed({
         if (st.blockage) {
           const wy = blockAt ?? Number.NaN;
           if (blockAt !== null && visible(wy)) {
-            if (st.blockage.kind === "accident") {
-              v.car(ctx, LANE * 0.85, wy - 14, -0.9, "#7f1d1d", 0, { plate: "34마 8120" });
-              v.car(ctx, LANE * 0.45 - 3, wy, 0.6, "#e5e7eb", 0, { plate: "61라 2207" });
-              for (let k = 0; k < 3; k++) {
-                const [cx, cy] = v.M(LANE * (0.2 + k * 0.4), wy - 32);
-                const kk = v.kAt(LANE * (0.2 + k * 0.4), wy - 32);
+            if (st.blockage.kind === "roadwork") {
+              // 도로 공사 구간: 파낸 노면 · 줄무늬 바리케이드 · 꼬깔 유도선 · 굴착기
+              const quad = (x0: number, x1: number, y0: number, y1: number, fill: string) => {
+                const c = [v.M(x0, y0), v.M(x1, y0), v.M(x1, y1), v.M(x0, y1)];
+                ctx.fillStyle = fill;
+                ctx.beginPath();
+                ctx.moveTo(c[0][0], c[0][1]);
+                for (let i = 1; i < 4; i++) ctx.lineTo(c[i][0], c[i][1]);
+                ctx.closePath();
+                ctx.fill();
+              };
+              quad(LANE * 0.08, LANE * 0.95, wy - 4, wy + 26, "#6b5a45");
+              quad(LANE * 0.18, LANE * 0.8, wy + 4, wy + 18, "#4a3d2f");
+              // 바리케이드 (주황·흰 줄무늬)
+              const bw = (LANE * 0.95 - LANE * 0.05) / 6;
+              for (let k = 0; k < 6; k++) quad(LANE * 0.05 + k * bw, LANE * 0.05 + (k + 1) * bw, wy - 10, wy - 7, k % 2 ? "#ffffff" : "#f97316");
+              // 꼬깔: 멀리서는 길가에 붙어 있다가 바리케이드에 가까울수록 중앙선 쪽으로 — 차로를 비스듬히 막는 유도선
+              for (let k = 0; k < 6; k++) {
+                const x = LANE * (0.2 + k * 0.15);
+                const y = wy - 14 - k * 9;
+                const [cx, cy] = v.M(x, y);
+                const kk = v.kAt(x, y);
                 ctx.fillStyle = "#f97316";
                 ctx.beginPath();
-                ctx.moveTo(cx, cy - 2.6 * kk);
+                ctx.moveTo(cx, cy - 2.8 * kk);
                 ctx.lineTo(cx + 2.2 * kk, cy + 2.2 * kk);
                 ctx.lineTo(cx - 2.2 * kk, cy + 2.2 * kk);
                 ctx.closePath();
                 ctx.fill();
+                ctx.fillStyle = "#ffffff";
+                ctx.fillRect(cx - 1.2 * kk, cy - 0.6 * kk, 2.4 * kk, 0.9 * kk);
               }
-              const [px, py] = v.screen(LANE * 0.6, wy - 6);
-              const r = boxR(26 * v.kAt(LANE * 0.6, wy - 6));
+              // 굴착기: 노란 차체 + 팔
+              quad(LANE * 0.55, LANE * 0.85, wy + 6, wy + 16, "#eab308");
+              quad(LANE * 0.6, LANE * 0.75, wy + 8, wy + 13, "#1f2937");
+              const [ax, ay] = v.M(LANE * 0.6, wy + 9);
+              const [bx, by] = v.M(LANE * 0.35, wy + 12);
+              ctx.strokeStyle = "#ca8a04";
+              ctx.lineWidth = Math.max(2, 1.6 * v.kAt(LANE * 0.5, wy + 10));
+              ctx.beginPath();
+              ctx.moveTo(ax, ay);
+              ctx.lineTo(bx, by);
+              ctx.stroke();
+              const [px, py] = v.screen(LANE * 0.5, wy + 4);
+              const r = boxR(30 * v.kAt(LANE * 0.5, wy + 4));
               ctx.setLineDash([6, 4]);
               ctx.strokeStyle = "#ff3b3b";
               ctx.lineWidth = 2.5;
               ctx.strokeRect(px - r, py - r, r * 2, r * 2);
               ctx.setLineDash([]);
-              label("사고 차량 · 차로 차단", px - r, py - r - 24, "rgba(127,29,29,0.92)");
+              label("도로 공사 · 차로 통제", px - r, py - r - 24, "rgba(127,29,29,0.92)");
             } else {
               const [px, py] = v.screen(ROAD_HALF - 6, wy);
               const r = boxR(30 * v.kAt(ROAD_HALF - 6, wy));
