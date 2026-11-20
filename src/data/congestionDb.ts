@@ -25,6 +25,14 @@ export const HOTSPOTS: Hotspot[] = [
     source: "가상 (실서비스: 안전신문고 신고 이력)",
   },
   {
+    id: "H-SM",
+    name: "서문대로 퇴근길 상습정체",
+    kind: "상습정체",
+    position: { lat: 35.08594, lng: 126.87395 },
+    activeHours: RUSH,
+    source: "가상 (실서비스: 국가교통정보센터 소통정보)",
+  },
+  {
     id: "H-NG",
     name: "나주-광주 경계 국도1호선 진입 병목",
     kind: "상습정체",

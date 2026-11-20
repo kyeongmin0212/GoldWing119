@@ -41,7 +41,8 @@ for (const [mode, sc] of Object.entries(SCENARIOS)) {
   if (sc.blockage) {
     const { fromSeg, segments } = sc.blockage.detour;
     const j = fromSeg === 0 ? sc.truckStart : sc.truckRoute[fromSeg - 1].to;
-    const dd = await osrm([j, ...(sc.blockage.detour.via ?? []), ...segments.map((x) => x.to)]);
+    // 중간 구간 끝점은 지나게 강제하지 않는다(교차로에서 되돌아가는 우회 방지) — 경유는 via 로만 지정, 구간 경계는 선 위 가장 가까운 점으로 대응
+    const dd = await osrm([j, ...(sc.blockage.detour.via ?? []), segments[segments.length - 1].to]);
     const dl = dd.routes[0].geometry.coordinates.map(([lng, lat]) => [+lat.toFixed(6), +lng.toFixed(6)]);
     detours[mode] = { distanceM: Math.round(dd.routes[0].distance), line: dl };
     console.log(mode, "detour", `${(dd.routes[0].distance / 1000).toFixed(2)}km`, `${dl.length}pts`);
