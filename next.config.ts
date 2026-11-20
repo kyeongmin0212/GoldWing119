@@ -15,6 +15,8 @@ const csp = [
 const nextConfig: NextConfig = {
   // Docker 배포용: 실행에 필요한 파일만 .next/standalone 에 모은다
   output: "standalone",
+  // 개발 모드 왼쪽 아래 N 버튼(Next.js 개발 도구) 숨김 — 화면 아래 정보를 가려서
+  devIndicators: false,
   async headers() {
     return [
       {
