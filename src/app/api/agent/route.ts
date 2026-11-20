@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import type { AgentHealth, AgentRequest, AgentResponse } from "@/types/drone";
 import { mockAgent } from "@/lib/mockAgent";
+import { friendlyNoDocAnswer } from "@/lib/noDocAnswer";
 import { buildReportDraft, checkModelSentences, draftFactSentence } from "@/lib/report";
 import { askAgent, lastJson, mask, pingAgent, wxoConfigured } from "@/lib/wxo";
 
@@ -131,7 +132,7 @@ export async function POST(request: Request) {
         ],
       };
     } else {
-      res = { mode: "live", threadId, sources, message: clean || text, steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
+      res = { mode: "live", threadId, sources, message: friendlyNoDocAnswer(clean || text, req.message), steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
     }
     return NextResponse.json(res);
   } catch (e) {

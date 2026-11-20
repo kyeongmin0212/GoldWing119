@@ -24,7 +24,7 @@ export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResp
   }
   // chat — 지식 문서를 근거로 답하는 흉내 (LIVE 에서는 Orchestrate 지식 RAG 가 실제로 답함)
   const q = req.message;
-  let answer = "문서에서 확인할 수 없음 — 담당자 확인이 필요합니다.";
+  let answer = "등록된 문서에 없는 내용이라 안내할 수 없습니다. 담당자에게 확인해 주세요.";
   let sources: string[] = [];
   if (/과태료|벌금|얼마/.test(q)) {
     answer = "과태료 금액이나 부과 여부는 제가 판단하지 않습니다. 증거와 통보 초안을 정리해 드리고, 최종 판단은 관할 지자체 담당자가 합니다.";
