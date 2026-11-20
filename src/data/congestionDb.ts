@@ -13,7 +13,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-BU",
     name: "백운광장 교차로 상습정체",
     kind: "상습정체",
-    position: { lat: 35.133, lng: 126.896 },
+    position: { lat: 35.13416, lng: 126.89688 },
     activeHours: RUSH,
     source: "가상 (실서비스: 국가교통정보센터 소통정보)",
   },
@@ -21,7 +21,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-BS",
     name: "봉선동 이면도로 불법주정차 다발",
     kind: "불법주정차다발",
-    position: { lat: 35.129, lng: 126.905 },
+    position: { lat: 35.13, lng: 126.9035 },
     source: "가상 (실서비스: 안전신문고 신고 이력)",
   },
   {
@@ -36,7 +36,7 @@ export const HOTSPOTS: Hotspot[] = [
     id: "H-HC",
     name: "효천지구 이면도로 불법주정차 다발",
     kind: "불법주정차다발",
-    position: { lat: 35.10051, lng: 126.87109 },
+    position: { lat: 35.0985, lng: 126.8672 },
     source: "가상 (실서비스: 안전신문고 신고 이력)",
   },
 ];

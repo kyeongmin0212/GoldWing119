@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.claude
+.env
+.env.local
+.env*.local
+*.tsbuildinfo
+orchestrate/.venv
+orchestrate/build_*
+**/__pycache__
+docs
+Dockerfile
+docker-compose.yml
+Caddyfile

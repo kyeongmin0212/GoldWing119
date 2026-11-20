@@ -3,13 +3,12 @@
 // 소방차 태블릿 오른쪽 — 운전 중 한눈에 보는 큰 글씨 상태판 (조작 버튼 없음)
 
 import { formatClock, truckAt } from "@/lib/geo";
-import { scenarioRoad } from "@/lib/road";
 import type { SimView } from "@/lib/simView";
 
 /** 지금 소방차 위치에서 toVertex 경유점까지 남은 실제 도로 거리(km) */
 function remainKm(sim: SimView, toVertex: number): number {
-  const { plan, simTime, scenario } = sim;
-  const { segKm } = scenarioRoad(scenario);
+  const { plan, simTime } = sim;
+  const { segKm } = plan.route.road;
   const t = truckAt(plan.truck, simTime);
   const k = t.segIndex;
   if (k + 1 > toVertex) return 0;
@@ -32,7 +31,8 @@ function Row({ label, children, tone }: { label: string; children: React.ReactNo
 }
 
 export default function CrewStatusPanel({ sim }: { sim: SimView }) {
-  const { plan, simTime, scenario, decision, launch, violations, status } = sim;
+  const { plan, simTime, scenario, decision, launch, violations, status, routeChoice } = sim;
+  const blk = plan.blockage && simTime >= plan.blockage.atSec ? plan.blockage : null;
   const started = status !== "idle";
   const remainSec = Math.max(0, plan.truck.totalSec - simTime);
 
@@ -46,6 +46,27 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
       <div className="box-head text-[16px]">출동 상황</div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <Row label="현장">{scenario.incident.name}</Row>
+        {blk && status === "rerouting" && (
+          <Row label="전방 차단 (드론 확인)" tone="fire">
+            {blk.label}
+            <span className="block text-[17px] font-semibold text-text">상황실에서 우회로 판단 중</span>
+          </Row>
+        )}
+        {blk && routeChoice === "detour" && (
+          <div className="border-b-4 border-ok bg-ok-soft px-4 py-3">
+            <div className="text-[14px] font-semibold text-ok">우회로 안내 (상황실 승인)</div>
+            <div className="mt-0.5 text-[22px] font-bold leading-snug text-text">{blk.summary}</div>
+            <div className="text-[16px] text-muted">
+              전방 {blk.label.replace(/ \(가상\)$/, "")} · 약 {Math.round(blk.savedSec / 60)}분 단축
+            </div>
+          </div>
+        )}
+        {blk && routeChoice === "stay" && (
+          <Row label="전방 차단 · 기존 경로 유지" tone="slow">
+            {blk.label}
+            <span className="block text-[17px] font-semibold text-text">드론 길터주기 방송으로 통과 유도</span>
+          </Row>
+        )}
         <Row label="현장 도착까지">{started ? `약 ${Math.ceil(remainSec / 60)}분 (T+${formatClock(plan.truck.totalSec)})` : "출동 대기"}</Row>
 
         {inCluster ? (
@@ -72,7 +93,17 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
             let tone: "fire" | "ok" | "drone" | undefined = "drone";
             if (simTime < d.launchSec + 25) text = `이륙 대기 (T+${formatClock(d.launchSec + 25)} 이륙)`;
             else if (simTime < d.scanStartSec) text = `${where}로 비행 중 · 약 ${Math.ceil((d.scanStartSec - simTime) / 60)}분 뒤 도착`;
-            else if (simTime >= d.broadcastSec) {
+            else if (d.aheadSec && simTime >= d.aheadSec && plan.blockage) {
+              text =
+                simTime < plan.blockage.atSec
+                  ? "소방차 경로를 따라 전방 선행 정찰 중"
+                  : routeChoice === "detour"
+                    ? "우회로를 앞서 비행하며 통행 확인 중"
+                    : routeChoice === "stay"
+                      ? "전방 차단 구간 길터주기 방송 중"
+                      : "전방 차단 확인 — 상황실 판단 중";
+              tone = simTime >= plan.blockage.atSec && !routeChoice ? "fire" : "drone";
+            } else if (simTime >= d.broadcastSec) {
               text = `${where} 도착 — 길터주기 방송 중`;
               tone = "ok";
             } else text = `${where} 도착 — 정찰·탐지 중`;
@@ -90,7 +121,7 @@ export default function CrewStatusPanel({ sim }: { sim: SimView }) {
                 <span key={v.id} className="block text-[18px]">
                   {v.plate} · {v.locationLabel.replace(/^전남광주통합특별시 /, "").replace(/ \(.*\)$/, "")}
                   <span className="ml-2 text-[15px] font-semibold text-muted">
-                    {v.status === "submitted" ? "상황실 통보 완료" : v.status === "dismissed" ? "상황실 확인" : "상황실 처리 중"}
+                    {v.status === "reviewed" ? "통보 초안 검토 완료" : v.status === "dismissed" ? "상황실 확인" : v.status === "pending" ? "통보 초안 검토 대기" : "통보 초안 작성 중"}
                   </span>
                 </span>
               ))}

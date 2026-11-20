@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import AgentLogTable from "@/components/AgentLogTable";
 import DispatchDecisionCard from "@/components/DispatchDecisionCard";
 import QueryPanel from "@/components/QueryPanel";
+import RerouteCard from "@/components/RerouteCard";
 import ViolationAlertCard from "@/components/ViolationAlertCard";
 import type { SimController } from "@/lib/useGoldenTimeSim";
 
@@ -17,14 +18,14 @@ export default function SidePanel({ sim }: { sim: SimController }) {
 
   // 판단·승인이 필요한 일이 생기면 사건 처리 탭으로
   useEffect(() => {
-    if (sim.status === "awaiting") setTab("case");
+    if (sim.status === "awaiting" || sim.status === "rerouting") setTab("case");
   }, [sim.status]);
   useEffect(() => {
     if (sim.violations.length) setTab("case");
   }, [sim.violations.length]);
 
   const tabs: [Tab, string][] = [
-    ["case", `사건 처리${pending ? ` (승인 ${pending})` : ""}`],
+    ["case", `사건 처리${pending ? ` (초안 검토 ${pending})` : ""}`],
     ["log", `에이전트 기록 (${sim.logs.length})`],
     ["query", "질의"],
   ];
@@ -47,6 +48,7 @@ export default function SidePanel({ sim }: { sim: SimController }) {
       <div className="min-h-0 flex-1">
         {tab === "case" && (
           <div className="scroll-thin h-full space-y-3 overflow-y-auto p-3">
+            <RerouteCard sim={sim} />
             <DispatchDecisionCard sim={sim} />
             <ViolationAlertCard sim={sim} />
           </div>

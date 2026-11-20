@@ -56,12 +56,6 @@ export function buildReportDraft(v: ViolationSample & { detectedAtIso: string })
     ],
     body:
       `119 긴급출동 중 선행 드론이 ${v.locationLabel}에서 ${v.vehicleType} ${v.plate}(가상)을 포착했습니다. ` +
-      `위반 의심 사유는 '${v.reason}'입니다. 소방 출동 연계 촬영 자료(사진 2장·좌표·해시)를 관할 지자체에 통보하며, 위반 여부와 처분은 ${j.agency} 담당자의 확인을 요청드립니다.`,
+      `위반 의심 사유는 '${v.reason}'입니다. 소방 출동 연계 촬영 자료(사진 2장·좌표·해시)를 관할 지자체에 통보하고자 하며, 위반 여부와 처분은 ${j.agency} 담당자의 확인을 요청드립니다.`,
   };
-}
-
-export function makeReceiptNo(): string {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  return `GJ-${ymd}-${Math.floor(1000 + Math.random() * 9000)} (MOCK)`;
 }

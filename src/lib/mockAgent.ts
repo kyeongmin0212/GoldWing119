@@ -1,7 +1,7 @@
 // 내장 시뮬레이션 에이전트 (MOCK) — IBM 연결이 없을 때도 같은 시연 흐름을 보장한다.
 
 import type { AgentRequest, AgentResponse } from "../types/drone.ts";
-import { buildReportDraft, makeReceiptNo } from "./report.ts";
+import { buildReportDraft } from "./report.ts";
 
 export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResponse {
   if (req.type === "violation_detected") {
@@ -17,24 +17,9 @@ export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResp
         { agent: "report", text: `[${req.violation.plate}] ① 번호판 형식 검증 — 고시 형식 일치 (가상 번호)`, delayMs: 1200 },
         { agent: "report", text: `[${req.violation.plate}] ② 관할 지자체 매핑 — ${draft.jurisdictionShort}(${draft.jurisdictionCode}) → ${draft.agency}`, delayMs: 1400 },
         { agent: "report", text: `[${req.violation.plate}] ③ 법적 근거 조회 — ${draft.legalBasis.length}건 (지식: 단속 규정 요약)`, delayMs: 1300 },
-        { agent: "report", text: `[${req.violation.plate}] ④ 지자체 통보 양식 초안 작성 완료 (사진 2장·GPS·해시) — 사람 승인 대기`, delayMs: 1500 },
+        { agent: "report", text: `[${req.violation.plate}] ④ 지자체 통보 양식 초안 작성 완료 (사진 2장·GPS·해시) — 관제요원 검토 대기`, delayMs: 1500 },
       ],
-      message: `[${req.violation.plate}] 신고서 초안을 작성했습니다. 위반 여부와 처분은 판단하지 않았으며, [신고 승인] 시 ${draft.agency}에 통보·연계합니다.`,
-    };
-  }
-  if (req.type === "report_approved") {
-    const receiptNo = makeReceiptNo();
-    return {
-      mode: "mock",
-      fallbackReason,
-      status: "submitted",
-      receiptNo,
-      steps: [
-        { agent: "report", text: `[${req.draft.plate}] 관제요원 승인 확인 — 증거 패키지 암호화·첨부`, delayMs: 800 },
-        { agent: "report", text: `${req.draft.agency} 단속 시스템으로 통보·연계 (시뮬레이션)`, delayMs: 1400 },
-        { agent: "report", text: `접수 완료 — 접수번호 ${receiptNo}`, delayMs: 900 },
-      ],
-      message: `신고·견인 요청이 접수되었습니다(시뮬레이션). 접수번호 ${receiptNo}. 처분 결정은 관할 담당자가 합니다.`,
+      message: `[${req.violation.plate}] 통보 초안을 작성했습니다. 위반 여부와 처분은 판단하지 않았습니다. 자동으로 통보하지 않으며, 검토 후 담당자가 ${draft.agency}에 직접 통보합니다.`,
     };
   }
   // chat — 지식 문서를 근거로 답하는 흉내 (LIVE 에서는 Orchestrate 지식 RAG 가 실제로 답함)
@@ -47,8 +32,11 @@ export function mockAgent(req: AgentRequest, fallbackReason?: string): AgentResp
     answer = "소방기본법 제25조제4항: 소방활동에 방해가 되는 주정차 차량의 제거·이동을 위해 관할 지자체 등에 견인차량과 인력 지원을 요청할 수 있고, 요청받은 기관은 정당한 사유가 없으면 협조해야 합니다. 요청 여부는 현장 지휘관이 판단합니다.";
     sources = ["관련 법령 조문 원문 발췌"];
   } else if (/관제권|비행|드론|공항|회피|금지/.test(q)) {
-    answer = "관제권(광주공항 반경 9.3km)은 회피구역이 아니라 비행승인 대상입니다. 화재 대응 긴급 비행은 항공안전법 제131조의2제2항에 해당하고, 사전에 국토교통부장관에게 알리면 비행승인을 받은 것으로 봅니다(제127조제4항). 활주로 회랑·송전선로·군사시설은 경로에서 빼고 우회합니다.";
+    answer = "관제권(광주공항 반경 9.3km)은 회피구역이 아니라 비행승인 대상입니다. 화재 대응 긴급 비행은 항공안전법 제131조의2제2항에 해당하고, 사전에 국토교통부장관에게 알리면 비행승인을 받은 것으로 봅니다(제127조제4항). (시연에서는 비행 제한 구역을 경로에 반영하지 않았고, 추후 보완 예정입니다.)";
     sources = ["관련 법령 조문 원문 발췌", "드론 선행 출동 운용 절차서"];
+  } else if (/양보|진로/.test(q)) {
+    answer = "도로교통법 제29조제4항: 교차로나 그 부근에서 긴급자동차가 접근하면 차마와 노면전차의 운전자는 교차로를 피하여 일시정지해야 하고, 제5항: 그 밖의 곳에서는 긴급자동차가 우선통행할 수 있도록 진로를 양보해야 합니다.";
+    sources = ["관련 법령 조문 원문 발췌"];
   } else if (/소화전|5m|5 m|주정차|주차/.test(q)) {
     answer = "도로교통법 제32조제6호: 소방용수시설 또는 비상소화장치가 설치된 곳으로부터 5미터 이내에는 정차·주차할 수 없습니다. 실제 처분 여부는 관할 지자체가 판단합니다.";
     sources = ["관련 법령 조문 원문 발췌"];

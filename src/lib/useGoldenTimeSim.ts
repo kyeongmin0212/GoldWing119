@@ -1,15 +1,15 @@
 "use client";
 
 // 시뮬레이션 상태·이벤트·에이전트 호출을 묶은 대시보드 컨트롤러 훅
-// 흐름: [출동 시나리오 시작] → 투입 판단(코드) → [드론 투입 승인] → 비행·정찰 → 탐지 → [신고 승인]
+// 흐름: [출동 시나리오 시작] → 투입 판단(코드) → [드론 투입 승인] → 소방차 경로를 따라 선행 정찰
+//       → (전방 차단 발견 시) [우회로 안내 승인 / 기존 경로 유지] → 탐지 → 통보 초안 작성 (실제 통보는 담당자가 직접)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOTSPOTS } from "@/data/congestionDb";
 import { DRONE_BASES } from "@/data/droneBases";
-import { CONTROL_ZONES, NO_FLY_ZONES } from "@/data/noFlyZones";
 import { SCENARIOS } from "@/data/scenarioData";
 import { decideDispatch } from "@/lib/dispatch";
-import { formatClock, mapJurisdiction, pathEntersCircle } from "@/lib/geo";
+import { formatClock, mapJurisdiction } from "@/lib/geo";
 import { buildSimPlan } from "@/lib/simulation";
 import { publishSnapshot, type SimSnapshot } from "@/lib/simBridge";
 import type {
@@ -17,6 +17,7 @@ import type {
   AgentName,
   AgentRequest,
   AgentResponse,
+  RouteChoice,
   ScenarioMode,
   SimStatus,
   ViolationRecord,
@@ -48,7 +49,9 @@ export function useGoldenTimeSim() {
   const decision = useMemo(() => decideDispatch(scenario, HOTSPOTS, DRONE_BASES), [scenario]);
   /** null = 아직 결정 전, true = 드론 투입 승인, false = 소방차만 */
   const [launch, setLaunch] = useState<boolean | null>(null);
-  const plan = useMemo(() => buildSimPlan(scenario, NO_FLY_ZONES, decision, launch === true), [scenario, decision, launch]);
+  /** 전방 차단 발견 시 관제요원의 경로 판단 (null = 판단 전) */
+  const [routeChoice, setRouteChoice] = useState<RouteChoice | null>(null);
+  const plan = useMemo(() => buildSimPlan(scenario, decision, launch === true, routeChoice), [scenario, decision, launch, routeChoice]);
 
   const [status, setStatus] = useState<SimStatus>("idle");
   const [speed, setSpeed] = useState(30);
@@ -168,22 +171,11 @@ export function useGoldenTimeSim() {
         id: `plan-${id}`,
         at: 0,
         run: () => {
-          if (f.blockedBy.length) {
-            addLog("route", `[${id}] 비행금지구역 DB 대조: 직선 경로가 '${f.blockedBy.join(", ")}' 침범 → 원천 배제`, "warn");
-            addLog(
-              "route",
-              `[${id}] 권장 우회 경로 ${f.plannedKm.toFixed(1)}km 산출 (+${(f.plannedKm - f.directKm).toFixed(1)}km, 꺾임점 ${f.path.length - 2}개, 안전거리 350m) — 원격 조종자 화면에 표시`,
-              "success",
-            );
-          } else {
-            addLog("route", `[${id}] 비행금지구역 침범 없음 — 직선 ${f.directKm.toFixed(1)}km 권장 경로를 원격 조종자에게 안내`, "success");
-          }
-          const ctr = CONTROL_ZONES.find((z) => pathEntersCircle(f.path, z.center, z.radiusKm));
-          if (ctr) {
-            addLog("route", `[${id}] '${ctr.name}' 통과 — 금지 아님, 승인 대상 (긴급비행 특례도 승인을 면제하지 않음)`, "warn");
-            addLog("route", `[${id}] 지자체 소방드론 화재 대응 긴급 비행(항공안전법 제131조의2②) · 관제기관 사전 협의 건 → 사전 통보 시 승인 간주 (제127조④·시행규칙 제308조⑧), 통보 문안 자동 생성`, "progress");
-            addLog("route", `[${id}] 비행 후 승인신청서 제출 예약 (제308조⑨) · 목적: 교통장애 모니터링(제313조의2①8호) — 출동 연계 정찰에 한정`, "info");
-          }
+          addLog(
+            "route",
+            `[${id}] 권장 경로: ${d.assignment.base.name} → 소방차 경로 합류(${f.directKm.toFixed(1)}km) → 소방차가 갈 도로를 따라 '${d.assignment.cluster.label}' 정찰 — 원격 조종자 화면에 표시`,
+            "success",
+          );
           addLog(
             "pathfinder",
             d.launchSec > 0
@@ -213,11 +205,34 @@ export function useGoldenTimeSim() {
         run: () => addLog("pathfinder", `[${id}] 소방차 도착 3분 전 — LED·음성 송출: "긴급차량 접근 중, 우측으로 양보 바랍니다"`, "info"),
       });
     }
-    scenario.truckRoute.forEach((s, k) => {
+    plan.route.segs.forEach((s, k) => {
       const inCluster = decision.clusters.some((c) => k >= c.firstSeg && k <= c.lastSeg);
       if (!inCluster) return;
       ev.push({ id: `truck-${k}`, at: plan.truck.times[k], run: () => addLog("system", `소방차 '${s.label}' 진입 (예상 ${s.speedKmh}km/h)`, "info") });
     });
+    const blk = plan.blockage;
+    const scoutSim = blk ? plan.drones.find((d) => d.assignment.droneId === blk.droneId) : undefined;
+    if (blk && scoutSim?.aheadSec)
+      ev.push({
+        id: `ahead-${blk.droneId}`,
+        at: scoutSim.aheadSec,
+        run: () => addLog("pathfinder", `[${blk.droneId}] 정찰 구간 통과 — 원격 조종자가 소방차 경로를 따라 전방 선행 정찰 계속`, "info"),
+      });
+    if (blk && routeChoice === null)
+      ev.push({
+        id: "blockage",
+        at: blk.atSec,
+        run: () => {
+          setFocusDrone(blk.droneId);
+          addLog("vision", `[${blk.droneId}] 전방 차단 확인 — ${blk.label}`, "warn");
+          addLog(
+            "route",
+            `우회로 비교(규칙 계산): 기존 경로 유지 시 현장 T+${formatClock(blk.stayArrivalSec)} / 우회(${blk.summary}) 시 T+${formatClock(blk.detourArrivalSec)} → ${formatClock(blk.savedSec)} 단축. 소방차 갈림길 도착 T+${formatClock(blk.decideBySec)} 전까지 판단 필요`,
+            "progress",
+          );
+          setStatus("rerouting");
+        },
+      });
     plan.detections.forEach((d) => {
       const v = scenario.violations.find((x) => x.id === d.violationId)!;
       ev.push({ id: `detect-${v.id}`, at: d.atSec, run: () => void detect(v, d.droneId, d.atSec) });
@@ -231,7 +246,7 @@ export function useGoldenTimeSim() {
       },
     });
     return ev;
-  }, [launch, plan, scenario, decision.clusters, addLog, detect]);
+  }, [launch, plan, scenario, decision.clusters, routeChoice, addLog, detect]);
 
   useEffect(() => {
     if (status !== "running") return;
@@ -250,6 +265,7 @@ export function useGoldenTimeSim() {
     fallbackShown.current = null;
     setStatus("idle");
     setLaunch(null);
+    setRouteChoice(null);
     setSimTime(0);
     setViolations([]);
     setLogs([]);
@@ -305,6 +321,25 @@ export function useGoldenTimeSim() {
     [status, decision, addLog],
   );
 
+  /** 관제요원 경로 판단: 우회로 안내 승인 / 기존 경로 유지 */
+  const chooseRoute = useCallback(
+    (choice: RouteChoice) => {
+      const blk = plan.blockage;
+      if (status !== "rerouting" || !blk) return;
+      if (choice === "detour") {
+        addLog("system", `관제요원 [우회로 안내 승인] — 소방차 화면에 안내: ${blk.summary}`, "info");
+        addLog("route", `소방차 경로 변경 — 현장 도착 예정 T+${formatClock(blk.detourArrivalSec)} (기존 유지 대비 ${formatClock(blk.savedSec)} 단축)`, "success");
+        addLog("pathfinder", `[${blk.droneId}] 원격 조종자가 우회로를 앞서 비행하며 통행 가능 여부 확인`, "info");
+      } else {
+        addLog("system", "관제요원 [기존 경로 유지] — 차단 구간은 드론 길터주기 방송으로 통과 유도", "info");
+        addLog("route", `현장 도착 예정 T+${formatClock(blk.stayArrivalSec)}`, "info");
+      }
+      setRouteChoice(choice);
+      setStatus("running");
+    },
+    [status, plan.blockage, addLog],
+  );
+
   const pause = useCallback(() => setStatus((s) => (s === "running" ? "paused" : s)), []);
 
   const changeMode = useCallback(
@@ -315,29 +350,15 @@ export function useGoldenTimeSim() {
     [reset],
   );
 
-  const approve = useCallback(
-    async (id: string) => {
+  /** 통보 초안 검토 완료 — 자동 통보하지 않는다. 실제 통보는 담당자가 관할 지자체 시스템에서 직접 */
+  const markReviewed = useCallback(
+    (id: string) => {
       const v = violations.find((x) => x.id === id);
       if (!v || !v.draft || v.status !== "pending") return;
-      const gen = genRef.current;
-      patchViolation(id, { status: "submitting" });
-      addLog("system", `관제요원 [신고 승인] — ${v.plate}`, "info");
-      try {
-        setBusyAgent("report");
-        const res = await callAgent({ type: "report_approved", violation: v, draft: v.draft, threadId: threadRef.current });
-        if (gen !== genRef.current) return;
-        setBackend(res.mode);
-        noteFallback(res);
-        if (!(await playSteps(res, gen))) return;
-        patchViolation(id, { status: "submitted", receiptNo: res.receiptNo, agentMessage: res.message });
-        addLog(res.mode === "live" ? "watsonx" : "report", res.message, "success");
-      } catch (e) {
-        setBusyAgent(null);
-        patchViolation(id, { status: "pending" });
-        addLog("system", `승인 처리 오류: ${e instanceof Error ? e.message : e}`, "warn");
-      }
+      patchViolation(id, { status: "reviewed" });
+      addLog("system", `관제요원 [검토 완료] — ${v.plate} 통보 초안 보관. 실제 통보는 담당자가 ${v.draft.agency}에 직접 진행`, "info");
     },
-    [violations, patchViolation, addLog, playSteps, noteFallback],
+    [violations, patchViolation, addLog],
   );
 
   const dismiss = useCallback(
@@ -345,7 +366,7 @@ export function useGoldenTimeSim() {
       const v = violations.find((x) => x.id === id);
       if (!v) return;
       patchViolation(id, { status: "dismissed" });
-      addLog("system", `관제요원 [무시] — ${v.plate} (신고하지 않음, 기록만 보존)`, "info");
+      addLog("system", `관제요원 [무시] — ${v.plate} (통보 초안 사용 안 함, 기록만 보존)`, "info");
     },
     [violations, patchViolation, addLog],
   );
@@ -387,6 +408,7 @@ export function useGoldenTimeSim() {
     simTime: simTimeRef.current,
     speed,
     launch,
+    routeChoice,
     focusDrone,
     violations,
     recentLogs: logs.slice(-8).map((l) => ({ simTime: l.simTime, agent: l.agent, text: l.text })),
@@ -401,7 +423,7 @@ export function useGoldenTimeSim() {
   }, []);
   useEffect(() => {
     pub();
-  }, [pub, mode, status, speed, launch, focusDrone, violations, logs, backend]);
+  }, [pub, mode, status, speed, launch, routeChoice, focusDrone, violations, logs, backend]);
   useEffect(() => {
     if (Date.now() - lastPubRef.current > 250) pub();
   }, [pub, simTime]);
@@ -416,8 +438,7 @@ export function useGoldenTimeSim() {
     decision,
     launch,
     plan,
-    zones: NO_FLY_ZONES,
-    controlZones: CONTROL_ZONES,
+    routeChoice,
     hotspots: HOTSPOTS,
     bases: DRONE_BASES,
     status,
@@ -438,7 +459,8 @@ export function useGoldenTimeSim() {
     reset,
     changeMode,
     confirmDispatch,
-    approve,
+    chooseRoute,
+    markReviewed,
     dismiss,
     chat,
   };

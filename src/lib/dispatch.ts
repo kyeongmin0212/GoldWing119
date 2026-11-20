@@ -1,7 +1,7 @@
 // 드론 투입 판단 — 결정적 규칙 (모델이 아닌 코드가 계산, 관제요원이 승인)
 // 규칙: 예상 지연 ≥ 3분 또는 경로에 활성 혼잡 DB 지점 포함 → 투입 권고
 //       혼잡 묶음(1.5km 이내) 1개 → 1대, 서로 떨어진 2개 이상 → 2대(최대 2대), 해당 없음 → 투입 안 함
-//       배차: 묶음 입구에서 가장 가까운 거점의 대기 드론
+//       배차: 출동 소방서 거점의 드론 우선 (정찰 구간 입구가 운용반경 10km 안일 때), 아니면 입구에서 가장 가까운 거점
 
 import type {
   DispatchDecision,
@@ -24,6 +24,10 @@ export const RUSH_HOURS: [number, number][] = [
 export const CLUSTER_KM = 1.5;
 export const DELAY_THRESHOLD_SEC = 180;
 export const MAX_DRONES_PER_INCIDENT = 2;
+/** 도크형 드론 운용반경 (DJI Dock 3 + Matrice 4D 사양 10km) */
+export const DRONE_RANGE_KM = 10;
+/** 출동 소방서와 같은 곳으로 보는 거리 */
+const SAME_SITE_KM = 0.5;
 
 export function freeFlow(s: RoadSegment): number {
   return s.freeFlowKmh ?? (s.congested ? Math.max(s.speedKmh, 50) : s.speedKmh);
@@ -101,10 +105,13 @@ export function decideDispatch(sc: Scenario, hotspots: Hotspot[], bases: DroneBa
 
   // 4) 배차
   const usedPerBase = new Map<string, number>();
+  const free = (b: DroneBase) => (usedPerBase.get(b.id) ?? 0) < b.capacity;
+  const home = bases.find((b) => distLatLng(b.position, sc.station.position) <= SAME_SITE_KM);
   const assignments: DroneAssignment[] = clusters.slice(0, recommend).map((c) => {
     const entry = pts[c.firstSeg];
     const sorted = [...bases].sort((a, b) => distLatLng(a.position, entry) - distLatLng(b.position, entry));
-    const base = sorted.find((b) => (usedPerBase.get(b.id) ?? 0) < b.capacity) ?? sorted[0];
+    const homeOk = home && free(home) && distLatLng(home.position, entry) <= DRONE_RANGE_KM;
+    const base = homeOk ? home : (sorted.find(free) ?? sorted[0]);
     const n = (usedPerBase.get(base.id) ?? 0) + 1;
     usedPerBase.set(base.id, n);
     const detect = c.hotspots.some((h) => h.kind === "불법주정차다발") || c.lastSeg === sc.truckRoute.length - 1;

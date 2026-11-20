@@ -13,6 +13,8 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // Docker 배포용: 실행에 필요한 파일만 .next/standalone 에 모은다
+  output: "standalone",
   async headers() {
     return [
       {

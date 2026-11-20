@@ -1,38 +1,67 @@
-// 검증: 투입 판단 규칙, 드론 경로의 비행금지구역 회피, 선행 시간(3~5분)
-import { NO_FLY_ZONES } from "../src/data/noFlyZones.ts";
+// 검증: 투입 판단 규칙, 드론이 소방차 경로를 따라 정찰하는지, 선행 시간(3~5분), 탐지, 전방 차단·우회로 판단
+// (비행 제한 구역 반영은 추후 보완 — 지금은 검사하지 않음)
 import { SCENARIOS } from "../src/data/scenarioData.ts";
 import { HOTSPOTS } from "../src/data/congestionDb.ts";
 import { DRONE_BASES, DRONE_POOL_TOTAL } from "../src/data/droneBases.ts";
-import { validatePath, formatClock, mapJurisdiction } from "../src/lib/geo.ts";
+import { distLatLng, formatClock, mapJurisdiction } from "../src/lib/geo.ts";
 import { decideDispatch } from "../src/lib/dispatch.ts";
-import { buildSimPlan } from "../src/lib/simulation.ts";
+import { buildSimPlan, type SimPlan } from "../src/lib/simulation.ts";
+import type { RouteChoice, Scenario } from "../src/types/drone.ts";
 
 const expected = { urban: 1, regional: 2, night: 0 } as const;
 let failed = 0;
 const fail = (m: string) => { console.log("  ✗ " + m); failed++; };
 
-for (const sc of Object.values(SCENARIOS)) {
-  const dec = decideDispatch(sc, HOTSPOTS, DRONE_BASES);
-  const plan = buildSimPlan(sc, NO_FLY_ZONES, dec, true);
-  console.log(`\n[${sc.mode}] ${sc.title}`);
-  dec.reasons.forEach((r) => console.log("  · " + r));
-  console.log(`  소방차 현장 도착 ${formatClock(plan.truck.totalSec)} (${plan.truck.totalKm.toFixed(1)}km)`);
-  if (dec.recommend !== expected[sc.mode]) fail(`투입 대수 ${dec.recommend} ≠ 기대 ${expected[sc.mode]}`);
-  for (const d of plan.drones) {
-    const v = validatePath(d.flight.path, NO_FLY_ZONES);
-    console.log(`  🚁 ${d.assignment.droneId} (${d.assignment.base.name}) → ${d.assignment.cluster.label} [${d.assignment.role}]`);
-    console.log(`     직선 ${d.flight.directKm.toFixed(2)}km / 계획 ${d.flight.plannedKm.toFixed(2)}km, 차단=${d.flight.blockedBy.join(",") || "없음"}, 겹침=${v.ok ? "없음" : v.violations.join(",")}`);
+/** 드론 정찰 궤적이 소방차 도로에서 벗어나지 않는지 (정찰 시작 이후 점들이 도로 선 60m 이내) */
+function followsRoad(plan: SimPlan, droneIdx: number): boolean {
+  const d = plan.drones[droneIdx];
+  const line = plan.route.road.line.map(([lat, lng]) => ({ lat, lng }));
+  const startK = d.times.findIndex((t) => t >= d.scanStartSec);
+  return d.points.slice(startK).every((p) => line.some((q) => distLatLng(p, q) < 0.06));
+}
+
+function report(sc: Scenario, plan: SimPlan, label: string) {
+  console.log(`  ${label} 소방차 현장 도착 ${formatClock(plan.truck.totalSec)} (${plan.truck.totalKm.toFixed(1)}km)`);
+  plan.drones.forEach((d, i) => {
+    console.log(`  🚁 ${d.assignment.droneId} (${d.assignment.base.name}) → ${d.assignment.cluster.label} [${d.assignment.role}] 이륙 ${formatClock(d.launchSec)}`);
     console.log(`     정찰구간 도착 드론 ${formatClock(d.scanStartSec)} / 소방차 ${formatClock(d.truckEntrySec)} → 선행 ${formatClock(d.leadSec)}`);
-    if (!v.ok) fail("금지구역 겹침");
-    if (d.leadSec < 180 || d.leadSec > 300) fail(`선행 시간 ${formatClock(d.leadSec)} 이 3~5분 범위 밖`);
-  }
+    if (d.leadSec < 180 || d.leadSec > 300) fail(`${label} ${d.assignment.droneId} 선행 시간 ${formatClock(d.leadSec)} 이 3~5분 범위 밖`);
+    if (label !== "[우회]" && !followsRoad(plan, i)) fail(`${label} ${d.assignment.droneId} 정찰 궤적이 소방차 도로를 벗어남`);
+  });
   for (const det of plan.detections) {
     const vio = sc.violations.find((x) => x.id === det.violationId)!;
     console.log(`  탐지 ${det.violationId} by ${det.droneId} @ ${formatClock(det.atSec)} — ${mapJurisdiction(vio.position).name}`);
   }
-  if (plan.detections.length !== sc.violations.length) fail(`탐지 ${plan.detections.length}/${sc.violations.length}`);
+  if (plan.detections.length !== sc.violations.length) fail(`${label} 탐지 ${plan.detections.length}/${sc.violations.length}`);
 }
-if (!SCENARIOS.urban || !buildSimPlan(SCENARIOS.urban, NO_FLY_ZONES, decideDispatch(SCENARIOS.urban, HOTSPOTS, DRONE_BASES), true).drones.some((d) => d.flight.avoided)) fail("도심형에서 공항 회피가 보이지 않음");
+
+for (const sc of Object.values(SCENARIOS)) {
+  const dec = decideDispatch(sc, HOTSPOTS, DRONE_BASES);
+  const plan = buildSimPlan(sc, dec, true);
+  console.log(`\n[${sc.mode}] ${sc.title}`);
+  dec.reasons.forEach((r) => console.log("  · " + r));
+  if (dec.recommend !== expected[sc.mode]) fail(`투입 대수 ${dec.recommend} ≠ 기대 ${expected[sc.mode]}`);
+  if (!plan.blockage) {
+    report(sc, plan, "");
+    continue;
+  }
+  const b = plan.blockage;
+  console.log(`  ⚠ ${b.droneId} 선행 정찰 중 전방 차단 발견 @ ${formatClock(b.atSec)} — ${b.label} (소방차 갈림길 도착 ${formatClock(b.decideBySec)})`);
+  console.log(`    기존 유지 ${formatClock(b.stayArrivalSec)} / 우회 ${formatClock(b.detourArrivalSec)} → ${formatClock(b.savedSec)} 단축 · ${b.summary}`);
+  if (b.atSec >= b.decideBySec) fail("소방차가 갈림길을 지난 뒤에 발견 — 우회 판단 불가");
+  if (b.savedSec <= 0) fail("우회로가 더 빠르지 않음");
+  for (const [ch, label] of [["detour", "[우회]"], ["stay", "[유지]"]] as [RouteChoice, string][]) {
+    const p = buildSimPlan(sc, dec, true, ch);
+    // 판단 전과 판단 후 계획이 판단 시각 전까지 같은지 (소방차 위치)
+    for (let s = 0; s < b.atSec; s += 30) {
+      const a = plan.truck, c = p.truck;
+      const pa = a.points.length && c.points.length ? [a, c].map((t) => { let k = 0; while (k < t.times.length - 2 && t.times[k + 1] <= s) k++; return k; }) : [0, 0];
+      if (pa[0] !== pa[1]) { fail(`${label} 판단 전 소방차 위치가 다름 @ ${formatClock(s)}`); break; }
+    }
+    p.drones.forEach((d) => { if (d.launchSec < b.atSec && plan.drones.find((x) => x.assignment.droneId === d.assignment.droneId)!.launchSec !== d.launchSec) fail(`${label} ${d.assignment.droneId} 판단 전 이륙 시각이 바뀜`); });
+    report(sc, p, label);
+  }
+}
 if (DRONE_POOL_TOTAL !== 18) fail(`시범 드론 풀 ${DRONE_POOL_TOTAL}대 ≠ 18대`);
 if (DRONE_BASES.some((b) => b.capacity !== 3)) fail("거점당 3대가 아님");
 console.log(failed ? `\nFAIL (${failed})` : "\nPASS");

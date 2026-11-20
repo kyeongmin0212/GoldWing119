@@ -6,7 +6,7 @@
 import { NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/types/drone";
 import { mockAgent } from "@/lib/mockAgent";
-import { buildReportDraft, makeReceiptNo } from "@/lib/report";
+import { buildReportDraft } from "@/lib/report";
 import { askAgent, lastJson, mask, wxoConfigured } from "@/lib/wxo";
 
 export const runtime = "nodejs";
@@ -21,7 +21,7 @@ function eventPrompt(req: AgentRequest): string {
     const draft = buildReportDraft(req.violation);
     return [
       "[대시보드 이벤트] 선행 드론이 긴급출동 진로 방해 의심 차량을 탐지했습니다.",
-      "아래 JSON 은 코드가 계산한 사실입니다. 이것만 근거로 신고서 초안 본문(3~4문장)을 작성하세요.",
+      "아래 JSON 은 코드가 계산한 사실입니다. 이것만 근거로 지자체 통보 초안 본문(3~4문장)을 작성하세요. 초안만 작성하며 통보·신고는 하지 않습니다.",
       "위반 확정·과태료·견인 여부는 판단하지 말고 담당자 확인이 필요하다고 적으세요.",
       '마지막 줄에 {"status":"pending","body":"<초안 본문>"} JSON 한 줄을 출력하세요.',
       JSON.stringify({
@@ -38,14 +38,6 @@ function eventPrompt(req: AgentRequest): string {
         legal_basis: draft.legalBasis,
         ocr_confidence: req.violation.confidence,
       }),
-    ].join("\n");
-  }
-  if (req.type === "report_approved") {
-    return [
-      "[대시보드 이벤트] 관제요원이 아래 신고서 초안을 승인했습니다.",
-      "관할 지자체 통보·연계 안내 문구를 2문장으로 작성하세요(주민신고가 아니라 소방 출동 연계 자료 통보). 처분 결정은 관할 담당자가 한다고 적으세요.",
-      '마지막 줄에 {"status":"submitted"} JSON 한 줄을 출력하세요.',
-      JSON.stringify({ event: "report_approved", plate: req.draft.plate, agency: req.draft.agency, title: req.draft.title }),
     ].join("\n");
   }
   return req.context ? `${req.message}\n\n[대시보드 상황]\n${req.context}` : req.message;
@@ -105,24 +97,11 @@ export async function POST(request: Request) {
         status: "pending",
         draft,
         sources,
-        message: clean || "신고서 초안이 작성되었습니다.",
+        message: clean || "통보 초안이 작성되었습니다.",
         steps: [
           { agent: "report", text: `관할 매핑(코드): ${draft.jurisdictionShort}(${draft.jurisdictionCode}) → ${draft.agency}`, delayMs: 300 },
           { agent: "watsonx", text: `Orchestrate 수퍼바이저 응답 수신 (${secs}s) — 초안 본문 작성`, delayMs: 400 },
-          { agent: "report", text: "신고서 초안 완료 — 사람 승인 대기", delayMs: 300 },
-        ],
-      };
-    } else if (req.type === "report_approved") {
-      const receiptNo = makeReceiptNo();
-      res = {
-        mode: "live",
-        threadId,
-        status: "submitted",
-        receiptNo,
-        message: `${clean} (접수번호 ${receiptNo})`,
-        steps: [
-          { agent: "watsonx", text: `Orchestrate 승인 처리 응답 (${secs}s)`, delayMs: 300 },
-          { agent: "report", text: `접수 완료 — ${receiptNo}`, delayMs: 300 },
+          { agent: "report", text: "통보 초안 완료 — 관제요원 검토 대기 (자동 통보 없음)", delayMs: 300 },
         ],
       };
     } else {

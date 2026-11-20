@@ -3,11 +3,10 @@
 
 import type { SimPlan } from "@/lib/simulation";
 import type {
-  ControlZone,
   DispatchDecision,
   DroneBase,
   Hotspot,
-  NoFlyZone,
+  RouteChoice,
   Scenario,
   ScenarioMode,
   SimStatus,
@@ -21,8 +20,8 @@ export interface SimView {
   /** null = 투입 결정 전, true = 드론 투입, false = 소방차만 */
   launch: boolean | null;
   plan: SimPlan;
-  zones: NoFlyZone[];
-  controlZones: ControlZone[];
+  /** 전방 차단 시 경로 판단 (null = 판단 전 또는 해당 없음) */
+  routeChoice: RouteChoice | null;
   hotspots: Hotspot[];
   bases: DroneBase[];
   status: SimStatus;

@@ -7,8 +7,11 @@ export type XY = { x: number; y: number };
 
 export type ScenarioMode = "urban" | "regional" | "night";
 
-/** awaiting = 드론 투입 판단 카드가 떠서 관제요원 승인을 기다리는 상태 */
-export type SimStatus = "idle" | "awaiting" | "running" | "paused" | "finished";
+/** awaiting = 드론 투입 판단 카드가 떠서 관제요원 승인을 기다리는 상태
+ *  rerouting = 선행 드론이 전방 차단을 발견해 우회로 안내 여부를 관제요원이 판단하는 상태 */
+export type SimStatus = "idle" | "awaiting" | "running" | "paused" | "rerouting" | "finished";
+/** 관제요원의 경로 판단: 우회로 안내 / 기존 경로 유지 */
+export type RouteChoice = "detour" | "stay";
 
 /** 관제권 — 금지가 아니라 비행 승인·관제탑 협의(긴급 공공목적은 통보) 대상 */
 export interface ControlZone {
@@ -70,6 +73,23 @@ export interface ViolationSample {
   confidence: number;
 }
 
+/** 드론 선행 정찰로 발견하는 전방 차단(사고 등) — 혼잡 DB 에 없는 돌발 상황 */
+export interface RoadBlockage {
+  /** 막힌 지점이 있는 구간 (기존 경로 기준 인덱스) */
+  segIndex: number;
+  position: LatLng;
+  label: string;
+  /** 그대로 지나가면 이 구간 속도 (km/h) */
+  blockedSpeedKmh: number;
+  detour: {
+    /** 이 구간부터 segments.length 개 구간을 우회 구간으로 바꾼다 (구간 수는 같게) */
+    fromSeg: number;
+    segments: RoadSegment[];
+    /** 소방차 화면에 띄울 안내 문구 */
+    summary: string;
+  };
+}
+
 export interface Scenario {
   mode: ScenarioMode;
   title: string;
@@ -80,6 +100,7 @@ export interface Scenario {
   truckStart: LatLng;
   truckRoute: RoadSegment[];
   violations: ViolationSample[];
+  blockage?: RoadBlockage;
 }
 
 export interface HotspotMatch {
@@ -122,8 +143,7 @@ export interface DispatchDecision {
 export type ViolationStatus =
   | "analyzing"
   | "pending"
-  | "submitting"
-  | "submitted"
+  | "reviewed"
   | "dismissed"
   | "error";
 
@@ -152,7 +172,6 @@ export interface ViolationRecord extends ViolationSample {
   detectedAtIso: string;
   status: ViolationStatus;
   draft?: ReportDraft;
-  receiptNo?: string;
   agentMessage?: string;
   /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */
   sources?: string[];
@@ -173,7 +192,6 @@ export interface AgentLog {
 /** /api/agent 요청 */
 export type AgentRequest =
   | { type: "violation_detected"; violation: ViolationSample & { detectedAtIso: string }; threadId?: string }
-  | { type: "report_approved"; violation: ViolationSample & { detectedAtIso: string }; draft: ReportDraft; threadId?: string }
   | { type: "chat"; message: string; context?: string; threadId?: string };
 
 export interface AgentStep {
@@ -188,8 +206,7 @@ export interface AgentResponse {
   steps: AgentStep[];
   message: string;
   draft?: ReportDraft;
-  receiptNo?: string;
-  status?: "pending" | "submitted";
+  status?: "pending";
   threadId?: string;
   fallbackReason?: string;
   /** 에이전트가 근거로 쓴 지식 문서 (RAG 출처) */

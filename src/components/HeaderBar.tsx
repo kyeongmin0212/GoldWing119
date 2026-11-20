@@ -74,9 +74,9 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
           <span className="font-mono text-[14px] tabular-nums" aria-label="경과 시간">
             T+{formatClock(simTime)}
           </span>
-          <button className={`btn ${running ? "" : "btn-fire"}`} onClick={running ? sim.pause : sim.start} disabled={status === "awaiting"}>
+          <button className={`btn ${running ? "" : "btn-fire"}`} onClick={running ? sim.pause : sim.start} disabled={status === "awaiting" || status === "rerouting"}>
             {running ? <Pause size={15} /> : <Play size={15} />}
-            {running ? "일시정지" : status === "awaiting" ? "투입 판단 대기" : status === "paused" ? "재개" : status === "finished" ? "다시 시작" : "출동 시나리오 시작"}
+            {running ? "일시정지" : status === "awaiting" ? "투입 판단 대기" : status === "rerouting" ? "우회로 판단 대기" : status === "paused" ? "재개" : status === "finished" ? "다시 시작" : "출동 시나리오 시작"}
           </button>
           <button className="btn" onClick={sim.reset}>
             <RotateCcw size={14} /> 초기화
@@ -97,10 +97,10 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
       {/* 요약 표 */}
       <div className="grid grid-cols-2 border-b border-line bg-white text-[13px] sm:grid-cols-5">
         {[
-          ["진행 상태", status === "idle" ? "대기" : status === "awaiting" ? "투입 판단 대기" : status === "running" ? "출동 중" : status === "paused" ? "일시정지" : "현장 도착"],
+          ["진행 상태", status === "idle" ? "대기" : status === "awaiting" ? "투입 판단 대기" : status === "rerouting" ? "우회로 판단 대기" : status === "running" ? "출동 중" : status === "paused" ? "일시정지" : "현장 도착"],
           ["투입 드론", `${activeDrones}대`],
           ["거점 대기 드론", `${DRONE_POOL_TOTAL - activeDrones} / ${DRONE_POOL_TOTAL}대 (시범 ${DRONE_BASES.length}거점)`],
-          ["통보 대기", `${pending}건`],
+          ["통보 초안", `${pending}건`],
           ["소방차 도착 예정", status === "idle" ? "—" : `T+${formatClock(plan.truck.totalSec)}${launch === false ? " (드론 미투입)" : ""}`],
         ].map(([k, v]) => (
           <div key={k} className="border-r border-line px-4 py-2 last:border-r-0">

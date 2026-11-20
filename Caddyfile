@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000 {
+		# 소방차 화면 실시간 중계(Server-Sent Events)가 막히지 않게 바로바로 내보낸다
+		flush_interval -1
+	}
+}

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import type { SimController } from "@/lib/useGoldenTimeSim";
 
-const QUICK = ["소화전 5m 규정 근거는?", "이 차량 과태료 얼마야?", "관제권 안에서 드론 띄워도 돼?", "견인 지원 요청 근거는?"];
+const QUICK = ["소화전 5m 규정 근거는?", "이 차량 과태료 얼마야?", "긴급차량 진로 양보 의무 근거는?", "견인 지원 요청 근거는?"];
 
 export default function QueryPanel({ sim }: { sim: SimController }) {
   const [text, setText] = useState("");

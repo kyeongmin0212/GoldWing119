@@ -1,6 +1,6 @@
 "use client";
 
-// 오프라인 대체용 개략 상황도 — 회피구역(빗금), 관제권(점선), 혼잡 지점, 소방차·드론 궤적 (SVG, 외부 지도 API 없음)
+// 오프라인 대체용 개략 상황도 — 혼잡 지점, 소방차·드론 궤적 (SVG, 외부 지도 API 없음). 비행 제한 구역 표시는 추후 보완
 // 상황실 콘솔과 소방차 태블릿이 같이 쓴다 (compact = 태블릿용 작은 지도).
 
 import { useMemo } from "react";
@@ -96,7 +96,8 @@ function DroneIcon({ x, y, active }: { x: number; y: number; active: boolean }) 
 }
 
 export default function SchematicMap({ sim, compact = false }: { sim: SimView; compact?: boolean }) {
-  const { scenario, plan, zones, controlZones, hotspots, bases, decision, simTime, violations, launch, status } = sim;
+  const { scenario, plan, hotspots, bases, decision, simTime, violations, launch, status } = sim;
+  const segs = plan.route.segs;
   const truckPts = useMemo(() => plan.truck.points, [plan.truck.points]);
   const truck = truckAt(plan.truck, simTime);
   const started = status !== "idle";
@@ -141,37 +142,6 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
             );
           })}
 
-        {/* 관제권 — 승인 필요 구역 (회피 대상 아님) */}
-        {controlZones.map((z) => {
-          const c = P(z.center);
-          return (
-            <g key={z.id}>
-              <circle cx={c.x} cy={c.y} r={z.radiusKm * S} fill="none" stroke={C.control} strokeOpacity="0.7" strokeWidth="1.5" strokeDasharray="9 6" />
-              {!compact && (
-                <text x={c.x} y={c.y - z.radiusKm * S + 18} fill={C.control} fontSize="12" textAnchor="middle" fontWeight={600}>
-                  {z.name} · 비행 승인 대상
-                </text>
-              )}
-            </g>
-          );
-        })}
-
-        {/* 회피구역 — 경로 계산에서 원천 배제 */}
-        {zones.map((z) => {
-          const ps = z.polygon.map(P);
-          const cx = ps.reduce((s, p) => s + p.x, 0) / ps.length;
-          const cy = ps.reduce((s, p) => s + p.y, 0) / ps.length;
-          return (
-            <g key={z.id}>
-              <polygon points={pts(z.polygon)} fill="url(#hatch)" stroke={C.avoid} strokeOpacity="0.8" strokeWidth="1.5" />
-              {!compact && (
-                <text x={cx} y={cy + 4} fill={C.avoid} fontSize="12" textAnchor="middle" fontWeight={700} stroke="#fff" strokeWidth="3" paintOrder="stroke">
-                  {z.name}
-                </text>
-              )}
-            </g>
-          );
-        })}
 
         {/* 혼잡 지점 */}
         {hotspots.map((h) => {
@@ -209,7 +179,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
         {truckPts.slice(1).map((p, k) => {
           const a = P(truckPts[k]);
           const b = P(p);
-          const cls = speedClass(scenario.truckRoute[k].speedKmh);
+          const cls = speedClass(segs[k].speedKmh);
           const color = cls === "정체" ? C.jam : cls === "서행" ? C.slow : C.road;
           return (
             <line
@@ -223,7 +193,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
               strokeLinecap="round"
               opacity={0.9}
             >
-              <title>{`${scenario.truckRoute[k].label ?? ""} — ${scenario.truckRoute[k].speedKmh}km/h (${cls})`}</title>
+              <title>{`${segs[k].label ?? ""} — ${segs[k].speedKmh}km/h (${cls})`}</title>
             </line>
           );
         })}
@@ -247,14 +217,6 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
             const focus = sim.focusDrone === d.assignment.droneId;
             return (
               <g key={d.assignment.droneId}>
-                {f.blockedBy.length > 0 && !compact && (
-                  <g>
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#8a93a3" strokeWidth="1.2" strokeDasharray="2 5" />
-                    <text x={(a.x + b.x) / 2 + 8} y={(a.y + b.y) / 2 - 6} fill="#5b6576" fontSize="11" stroke="#fff" strokeWidth="3" paintOrder="stroke">
-                      직선 경로 불가 (회피구역)
-                    </text>
-                  </g>
-                )}
                 <polyline points={pts(d.points.slice(1))} fill="none" stroke={C.drone} strokeOpacity="0.4" strokeWidth="2" strokeDasharray="6 5" />
                 {flying && <polyline points={pts(flown)} fill="none" stroke={C.drone} strokeWidth="2.5" strokeLinejoin="round" />}
                 {flying && (
@@ -277,7 +239,7 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
         {/* 탐지 차량 */}
         {violations.map((v) => {
           const p = P(v.position);
-          const done = v.status === "submitted";
+          const done = v.status === "reviewed";
           const color = done ? C.ok : C.avoid;
           return (
             <g key={v.id} transform={`translate(${p.x},${p.y})`} onClick={() => sim.setSelectedId(v.id)} style={{ cursor: "pointer" }}>
@@ -308,13 +270,6 @@ export default function SchematicMap({ sim, compact = false }: { sim: SimView; c
 
       {!compact && (
         <div className="pointer-events-none absolute left-2 top-2 space-y-1 border border-line bg-white/95 p-2 text-[11px] text-muted">
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-3 w-4 border border-fire" style={{ background: "repeating-linear-gradient(45deg, rgba(200,16,46,.45) 0 2px, transparent 2px 6px)" }} />
-            회피구역 (경로에서 배제)
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-3 w-4 rounded-full border border-dashed border-slow" /> 관제권 (비행 승인 대상)
-          </div>
           <div className="flex items-center gap-2">
             <span className="inline-block h-1 w-4 bg-fire" /> 정체 ≤15 <span className="ml-1 inline-block h-1 w-4 bg-amber-600" /> 서행 15~25 km/h
           </div>

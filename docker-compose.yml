@@ -1,0 +1,31 @@
+# 서버 배포: 앱(Next.js) + Caddy(HTTPS 인증서 자동 발급·갱신)
+# 1) 서버에 이 폴더를 올리고 .env 파일을 만든다 (deploy.env.example 참고, 키는 서버에서 직접 입력)
+# 2) 도메인 DNS A 레코드를 서버 공인 IP 로 지정, 방화벽 80·443 열기
+# 3) docker compose up -d --build   →   https://<도메인> (상황실), https://<도메인>/crew (소방차 화면)
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN 을 .env 에 넣으세요}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

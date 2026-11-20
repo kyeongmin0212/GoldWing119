@@ -1,0 +1,23 @@
+# Cloudflare Tunnel 배포: 앱(Next.js) + cloudflared 커넥터
+# 공인 IP·포트 개방·HTTPS 인증서가 필요 없다 — cloudflared 가 Cloudflare 로 바깥쪽 연결을 열고, Cloudflare 가 HTTPS 를 처리한다.
+# 1) Cloudflare 대시보드 → 네트워킹 → 터널 → 새 터널(cloudflared) 만들기 → 토큰을 .env 의 TUNNEL_TOKEN 에 넣기
+# 2) 그 터널의 경로(공개 호스트 이름) 추가: 예) goldenwing.<도메인> → 서비스 HTTP, URL app:3000
+# 3) docker compose -f docker-compose.tunnel.yml up -d --build
+# ※ 다른 사이트용 기존 터널에 커넥터로 붙이지 말 것 — 그 터널의 모든 경로가 이 컴퓨터로도 나뉘어 들어와 다른 사이트가 깨질 수 있다.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3000"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2024.12.2
+    restart: unless-stopped
+    depends_on:
+      - app
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN 을 .env 에 넣으세요}

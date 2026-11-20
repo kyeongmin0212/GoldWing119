@@ -1,6 +1,6 @@
 "use client";
 
-// 소방차 태블릿 화면 — 상황실 콘솔의 상태를 BroadcastChannel 로 실시간 공유받아 보기 전용으로 표시
+// 소방차 태블릿 화면 — 상황실 콘솔의 상태를 실시간 공유받아(같은 브라우저: BroadcastChannel, 다른 기기: 서버 중계) 보기 전용으로 표시
 // 드론은 상황실 원격 조종자(사람)가 조종한다. 대원은 조종하지 않고 영상과 전방 상황만 본다.
 
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +9,6 @@ import DroneVisionFeed from "@/components/DroneVisionFeed";
 import TacticalMap from "@/components/TacticalMap";
 import { HOTSPOTS } from "@/data/congestionDb";
 import { DRONE_BASES } from "@/data/droneBases";
-import { CONTROL_ZONES, NO_FLY_ZONES } from "@/data/noFlyZones";
 import { SCENARIOS } from "@/data/scenarioData";
 import { decideDispatch } from "@/lib/dispatch";
 import { formatClock } from "@/lib/geo";
@@ -39,7 +38,8 @@ export default function CrewPage() {
   const scenario = SCENARIOS[mode];
   const decision = useMemo(() => decideDispatch(scenario, HOTSPOTS, DRONE_BASES), [scenario]);
   const launch = snap?.launch ?? null;
-  const plan = useMemo(() => buildSimPlan(scenario, NO_FLY_ZONES, decision, launch === true), [scenario, decision, launch]);
+  const routeChoice = snap?.routeChoice ?? null;
+  const plan = useMemo(() => buildSimPlan(scenario, decision, launch === true, routeChoice), [scenario, decision, launch, routeChoice]);
 
   const simTime = !snap
     ? 0
@@ -53,8 +53,7 @@ export default function CrewPage() {
     decision,
     launch,
     plan,
-    zones: NO_FLY_ZONES,
-    controlZones: CONTROL_ZONES,
+    routeChoice,
     hotspots: HOTSPOTS,
     bases: DRONE_BASES,
     status: snap?.status ?? "idle",
@@ -79,7 +78,7 @@ export default function CrewPage() {
 
       {!connected && (
         <div className="border-b border-slow bg-slow-soft px-4 py-2 text-[15px] text-slow">
-          상황실 콘솔과 연결되지 않았습니다. 같은 브라우저에서 상황실 화면(/)을 열고 시나리오를 시작하면 이 화면이 자동으로 따라갑니다.
+          상황실 콘솔과 연결되지 않았습니다. 상황실 화면(같은 주소의 첫 화면)에서 시나리오를 시작하면 이 화면이 자동으로 따라갑니다 — 같은 브라우저든 다른 기기든 됩니다.
         </div>
       )}
 

@@ -1,14 +1,15 @@
 "use client";
 
 // 실제 지도(OpenStreetMap, Leaflet) 위에 출동 상황을 그린다 — 키·가입 없음.
-// 관제권(점선 원), 회피구역, 혼잡 지점, 소통 등급별 소방차 경로, 드론 권장 경로·실제 궤적, 소방차·드론·탐지 차량 표시.
+// 혼잡 지점, 소통 등급별 소방차 경로, 드론 권장 경로·실제 궤적, 소방차·드론·탐지 차량, 전방 차단·우회로 표시.
+// 비행 제한 구역(관제권·회피구역) 표시는 추후 보완.
 // 지도 타일을 6초 안에 하나도 못 받으면 onFail 로 알려 개략도(SchematicMap)로 바꾼다.
 
 import { useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import type * as Leaflet from "leaflet";
 import { formatClock, speedClass, truckAt } from "@/lib/geo";
-import { scenarioRoad } from "@/lib/road";
+import { scenarioRoute } from "@/lib/road";
 import { droneAt } from "@/lib/simulation";
 import type { SimView } from "@/lib/simView";
 import type { LatLng } from "@/types/drone";
@@ -44,7 +45,7 @@ const TRUCK_SVG = `<svg width="28" height="22" viewBox="0 0 28 22"><rect x="1" y
 const FIRE_SVG = `<svg width="24" height="24" viewBox="-12 -12 24 24"><circle r="10" fill="#fff" stroke="${C.avoid}" stroke-width="2.5"/><path d="M0,-6 C3.5,-1.5 5,1 5,3.5 A5,5 0 0 1 -5,3.5 C-5,1 -2.5,-1.5 0,-6 Z" fill="${C.avoid}"/></svg>`;
 
 export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimView; compact?: boolean; onFail?: () => void }) {
-  const { scenario, plan, zones, controlZones, hotspots, bases, decision, simTime, violations, launch, status } = sim;
+  const { scenario, plan, hotspots, bases, decision, simTime, violations, launch, status, routeChoice } = sim;
   const elRef = useRef<HTMLDivElement>(null);
   const LRef = useRef<LMod | null>(null);
   const mapRef = useRef<Leaflet.Map | null>(null);
@@ -55,15 +56,17 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     traveled: Leaflet.Polyline | null;
     drones: Map<string, { marker: Leaflet.Marker; flown: Leaflet.Polyline; key: string }>;
     viol: Map<string, { marker: Leaflet.Marker; key: string }>;
-  }>({ group: null, truck: null, traveled: null, drones: new Map(), viol: new Map() });
+    block: Leaflet.LayerGroup | null;
+    blockKey: string;
+  }>({ group: null, truck: null, traveled: null, drones: new Map(), viol: new Map(), block: null, blockKey: "" });
   const [ready, setReady] = useState(false);
   const simRef = useRef(sim);
   simRef.current = sim;
   const onFailRef = useRef(onFail);
   onFailRef.current = onFail;
 
-  // 시나리오의 실제 도로 선과 구간 경계 비율 — 시뮬레이션 시간 계산과 같은 공용 모듈(@/lib/road)
-  const road = scenarioRoad(scenario);
+  // 지금 소방차가 가는 경로(기존 또는 우회)의 실제 도로 선과 구간 경계 비율 — 시뮬레이션과 같은 값(plan.route)
+  const road = plan.route.road;
 
   // 1) 지도 만들기 (한 번)
   useEffect(() => {
@@ -114,25 +117,10 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     dyn.traveled = null;
     dyn.drones.clear();
     dyn.viol.clear();
+    dyn.block = null;
+    dyn.blockKey = "";
 
     const icon = (html: string, size: [number, number], anchor: [number, number]) => L.divIcon({ html, className: "gjw-icon", iconSize: size, iconAnchor: anchor });
-    const tip = (text: string) => ({ permanent: true, direction: "center" as const, className: "gjw-zone-label", interactive: false });
-
-    // 관제권 — 승인 대상 (회피 대상 아님)
-    controlZones.forEach((z) => {
-      L.circle(ll(z.center), { radius: z.radiusKm * 1000, color: C.control, weight: 1.5, dashArray: "8 6", fill: false, interactive: false }).addTo(g);
-      if (!compact)
-        L.marker([z.center.lat + (z.radiusKm - 0.6) / 111, z.center.lng], {
-          icon: icon(label(`${z.name} · 비행 승인 대상`, C.control, "transform:translateX(-50%)"), [1, 1], [0, 0]),
-          interactive: false,
-        }).addTo(g);
-    });
-
-    // 회피구역 — 권장 경로에서 원천 배제
-    zones.forEach((z) => {
-      const poly = L.polygon(z.polygon.map(ll), { color: C.avoid, weight: 1.5, dashArray: "4 3", fillColor: C.avoid, fillOpacity: 0.16, interactive: false }).addTo(g);
-      if (!compact) poly.bindTooltip(z.name, tip(z.name));
-    });
 
     // 혼잡 지점
     const activeIds = new Set(decision.matches.filter((m) => m.active).map((m) => m.hotspot.id));
@@ -151,8 +139,9 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     // 드론 거점
     if (!compact)
       bases.forEach((b) => {
+        const atStation = Math.abs(b.position.lat - scenario.station.position.lat) + Math.abs(b.position.lng - scenario.station.position.lng) < 0.005;
         L.marker(ll(b.position), {
-          icon: icon(`<span style="display:inline-block;width:10px;height:10px;background:#fff;border:2px solid ${C.base}"></span>${label(b.name, C.base, "margin-left:4px")}`, [12, 12], [6, 6]),
+          icon: icon(`<span style="display:inline-block;width:10px;height:10px;background:#fff;border:2px solid ${C.base}"></span>${atStation ? "" : label(b.name, C.base, "margin-left:4px")}`, [12, 12], [6, 6]),
           interactive: false,
         }).addTo(g);
       });
@@ -162,7 +151,7 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     decision.clusters.forEach((c) => {
       for (let k = c.firstSeg; k <= c.lastSeg; k++) clusterSegs.add(k);
     });
-    scenario.truckRoute.forEach((seg, k) => {
+    plan.route.segs.forEach((seg, k) => {
       const cls = speedClass(seg.speedKmh);
       const color = cls === "정체" ? C.jam : cls === "서행" ? C.slow : C.road;
       L.polyline(road.tools.sub(road.fr[k], road.fr[k + 1]), { color, weight: clusterSegs.has(k) ? 8 : 6, opacity: 0.85 })
@@ -173,9 +162,6 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
     // 드론 권장 경로
     if (launch)
       plan.drones.forEach((d) => {
-        const f = d.flight;
-        if (f.blockedBy.length && !compact)
-          L.polyline([ll(f.path[0]), ll(f.path[f.path.length - 1])], { color: "#6b7280", weight: 1.5, dashArray: "2 6", interactive: false }).addTo(g);
         L.polyline(d.points.slice(1).map(ll), { color: C.drone, weight: 3, dashArray: "7 6", opacity: 0.55, interactive: false }).addTo(g);
       });
 
@@ -192,9 +178,10 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
 
     // 화면 맞추기: 경로 + 현장 + (투입 시) 드론 경로
     const pts: [number, number][] = [...road.line, ll(scenario.incident.position)];
-    if (launch) plan.drones.forEach((d) => d.points.forEach((p) => pts.push(ll(p))));
+    // 드론은 정찰 구간만 화면에 맞춘다 (거점 → 경로 합류 비행까지 넣으면 화면이 공항 쪽으로 넓어짐)
+    if (launch) plan.drones.forEach((d) => d.points.forEach((p, i) => { if (d.times[i] >= d.scanStartSec) pts.push(ll(p)); }));
     map.fitBounds(L.latLngBounds(pts), { padding: compact ? [18, 18] : [40, 40], maxZoom: 15 });
-  }, [ready, scenario, plan, decision, launch, zones, controlZones, hotspots, bases, compact]);
+  }, [ready, scenario, plan, decision, launch, hotspots, bases, compact]);
 
   // 3) 매 프레임 바뀌는 층: 소방차·지나온 길·드론·탐지 차량
   useEffect(() => {
@@ -253,9 +240,45 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
         }
       });
 
+    // 전방 차단(정찰 드론 발견) · 권장 우회로
+    const blk = plan.blockage;
+    const bKey = blk && started && simTime >= blk.atSec ? (routeChoice ?? "pending") : "";
+    if (dyn.blockKey !== bKey) {
+      dyn.block?.remove();
+      dyn.block = null;
+      dyn.blockKey = bKey;
+      const det = scenario.blockage?.detour;
+      if (blk && bKey && det) {
+        const lg = L.layerGroup().addTo(g);
+        const from = det.fromSeg;
+        const rejoin = from + det.segments.length;
+        if (routeChoice !== "detour") {
+          const dr = scenarioRoute(scenario, "detour").road;
+          L.polyline(dr.tools.sub(dr.fr[from], dr.fr[rejoin]), { color: C.ok, weight: 5, dashArray: "8 6", opacity: 0.9, interactive: false }).addTo(lg);
+          if (!compact && routeChoice === null) {
+            const mid = dr.tools.at((dr.fr[from] + dr.fr[rejoin]) / 2);
+            L.marker(mid, { icon: icon(label("권장 우회로", C.ok, "transform:translate(-50%,-140%)"), [1, 1], [0, 0]), interactive: false }).addTo(lg);
+          }
+        } else {
+          const br = scenarioRoute(scenario, "base").road;
+          L.polyline(br.tools.sub(br.fr[from], br.fr[rejoin]), { color: "#9ca3af", weight: 5, dashArray: "3 7", opacity: 0.9, interactive: false }).addTo(lg);
+        }
+        L.marker(ll(blk.position), {
+          icon: icon(
+            `<svg width="22" height="22" viewBox="-11 -11 22 22"><rect x="-10" y="-10" width="20" height="20" fill="#fff" stroke="${C.avoid}" stroke-width="2.5"/><path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="${C.avoid}" stroke-width="2.6"/></svg>${compact ? "" : label("사고 · 차로 차단", C.avoid, "margin-left:4px")}`,
+            [22, 22],
+            [11, 11],
+          ),
+          zIndexOffset: 800,
+          interactive: false,
+        }).addTo(lg);
+        dyn.block = lg;
+      }
+    }
+
     // 탐지 차량
     violations.forEach((v) => {
-      const done = v.status === "submitted";
+      const done = v.status === "reviewed";
       const color = done ? C.ok : C.avoid;
       const key = `${v.status}`;
       const html = `<span style="display:inline-block;width:12px;height:12px;background:#fff;border:2.5px solid ${color}"></span>${label(v.plate, color, "margin-left:3px")}`;
@@ -280,17 +303,17 @@ export default function LeafletMap({ sim, compact = false, onFail }: { sim: SimV
       {!compact && (
         <div className="pointer-events-none absolute left-12 top-2 z-[1000] space-y-1 border border-line bg-white/95 p-2 text-[11px] text-muted">
           <div className="flex items-center gap-2">
-            <span className="inline-block h-3 w-4 border border-dashed border-fire bg-fire/15" /> 회피구역 (권장 경로에서 배제)
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-3 w-4 rounded-full border border-dashed border-slow" /> 관제권 (비행 승인 대상)
-          </div>
-          <div className="flex items-center gap-2">
             <span className="inline-block h-1 w-4 bg-fire" /> 정체 ≤15 <span className="ml-1 inline-block h-1 w-4 bg-amber-600" /> 서행 15~25 km/h
           </div>
           <div className="flex items-center gap-2">
-            <span className="inline-block h-0.5 w-4 bg-truck" /> 소방차 <span className="ml-1 inline-block h-0.5 w-4 bg-drone" /> 드론 (원격 조종자)
+            <span className="inline-block h-0.5 w-4 bg-truck" /> 소방차 <span className="ml-1 inline-block h-0.5 w-4 bg-drone" /> 드론 (원격 조종자, 소방차 경로 따라 정찰)
           </div>
+          {plan.blockage && (
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-0.5 w-4 border-t-2 border-dashed border-ok" /> 권장 우회로 (드론이 전방 차단 발견 시)
+            </div>
+          )}
+          <div className="text-faint">비행 제한 구역 반영은 추후 보완</div>
         </div>
       )}
 
