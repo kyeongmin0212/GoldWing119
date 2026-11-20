@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { UserRound, Video } from "lucide-react";
-import { LANE, ROAD_HALF, createAerialScene } from "@/lib/aerialScene";
+import { LANE, ROAD_HALF, createAerialScene, type AerialSolid, type AerialView } from "@/lib/aerialScene";
 import { formatClock, formatLatLng, truckAt, type TruckTimeline } from "@/lib/geo";
 import { scenarioRoute, type ScenarioRoad } from "@/lib/road";
 import { droneAt, type DroneSim } from "@/lib/simulation";
@@ -17,8 +17,14 @@ import type { SimView } from "@/lib/simView";
 import type { LatLng, ViolationRecord, ViolationSample } from "@/types/drone";
 
 type Phase = "standby" | "nodrone" | "prep" | "transit" | "scan";
-/** 갈림길 정보: 그 경로 선에서 갈림길까지 거리(m), 갈림길부터 앞으로(최대 FORK_LEN_M) 진행 방향 표 */
-type ForkLine = { junction: number; branch: number[] };
+/**
+ * 갈림길 정보: 그 경로 선에서 갈림길까지 거리(m), 갈림길 조금 앞(at, m)부터 갈림길 뒤 FORK_LEN_M 까지의 진행 방향 표.
+ * 진행 방향 표는 선 전체로 계산한 표(headingTable)를 잘라 쓴다 — 갈림길 앞뒤로 부드럽게 꺾이는 부분까지
+ * 큰길을 이 선으로 바꿨을 때와 똑같이 그려져, 미리 그린 길과 전환 뒤 길이 정확히 겹친다.
+ */
+type ForkLine = { junction: number; at: number; branch: number[]; th: number[] };
+/** 갈림길 정보 표에서 경로 선 위 m 지점의 진행 방향 */
+const forkDir = (f: ForkLine, m: number) => f.branch[Math.max(0, Math.min(f.branch.length - 1, Math.round((m - f.at) / PATH_STEP_M)))];
 /** 갈림길 도로를 미리 그려 둘 길이(m) */
 const FORK_LEN_M = 300;
 
@@ -187,11 +193,12 @@ export default function DroneVisionFeed({
       const pts = r.line.map(([lat, lng]) => ({ lat, lng }));
       const cum = [0];
       for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + meters(pts[i - 1], pts[i]));
-      const j0 = r.idx[det.fromSeg];
-      const junction = cum[j0];
-      let j1 = j0;
-      while (j1 < pts.length - 1 && cum[j1] - junction < FORK_LEN_M) j1++;
-      return { junction, branch: headingTable(pts.slice(j0, j1 + 1), cum.slice(j0, j1 + 1).map((c) => c - junction)) };
+      const junction = cum[r.idx[det.fromSeg]];
+      // 갈림길 앞 (부드럽게 펴는 폭 + 방향 재는 폭) 지점부터 — 거기까지는 두 선이 같아 큰길과 겹친다
+      const th = headingTable(pts, cum);
+      const k0 = Math.max(0, Math.floor((junction - PATH_SMOOTH_M - 6) / PATH_STEP_M) - 1);
+      const k1 = Math.min(th.length, Math.ceil((junction + FORK_LEN_M) / PATH_STEP_M) + 1);
+      return { junction, at: k0 * PATH_STEP_M, branch: th.slice(k0, k1), th };
     };
     return { base: mk(scenarioRoute(sim.scenario, "base").road), det: mk(dr.road) };
   }, [sim.scenario]);
@@ -225,14 +232,23 @@ export default function DroneVisionFeed({
     let raf = 0;
     let last = performance.now();
     let alongDisp = 0;
+    /** 시뮬레이션 배속 추정(시뮬 초 / 실제 초) */
+    let simRate = 5;
+    let lastSim: number | null = null;
     let turnTarget = 0;
     /** 화면에 보이는 카메라 방향(세계 기준) — 뒤돌기·갈림길에서 끊기지 않고 이어서 돈다 */
     let camDisp: number | null = null;
     let yieldAmt = 0;
     let zoom = 1;
     let scene = createAerialScene(3);
+    /** 갈림길 저쪽 경로를 큰길로 둔 장면 — 갈림길 근처에서 저쪽 길 방향 화면을 이 장면으로 그린다 */
+    let sceneO = createAerialScene(3);
     let sceneSeed = 3;
     let pathOf: number[] | null = null;
+    /** 우회 승인 뒤 갈림길에서 우회선으로 바꿨는가 (어느 계획의 것인지 detourKey 로 구분) */
+    let onDetour = false;
+    let reachedJ = false;
+    let detourKey: number[] | null = null;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
 
     const resize = () => {
@@ -308,16 +324,33 @@ export default function DroneVisionFeed({
       if (st.seed !== sceneSeed) {
         sceneSeed = st.seed;
         scene = createAerialScene(sceneSeed);
+        sceneO = createAerialScene(sceneSeed);
         pathOf = null;
       }
-      // 우회 승인 뒤 드론이 갈림길까지 왔던 길로 되돌아가는 동안은 기존 경로 선을 쓰고(뒤돌아 비행), 갈림길에 닿으면 우회로 선으로
+      // 우회 승인 뒤 드론이 갈림길까지 왔던 길로 되돌아가는 동안은 기존 경로 선을 쓰고(뒤돌아 비행), 갈림길에 닿으면 우회로 선으로.
+      // 바꾸는 때는 실제 드론 위치가 아니라 화면 위치(alongDisp)로 정한다 — 화면 위치는 조금 늦게 따라오므로,
+      // 실제 위치로 바꾸면 그 순간 화면 위치가 우회로 안쪽으로 순간이동했다가 미끄러지고 카메라가 한 번에 돌았다.
+      // 한 번 바꾸면 그대로 둔다(갈림길까지 두 선의 앞부분이 같아 위치가 이어진다).
       let R = { pts: st.roadPts, cum: st.cum };
       let onBase = st.onBaseLine;
-      if (st.basePts && st.baseCum && st.junctionAlong !== null && st.drone && (st.phase === "scan" || st.phase === "transit")) {
+      let holdBase = false;
+      if (st.baseCum !== detourKey) {
+        detourKey = st.baseCum;
+        onDetour = false;
+        reachedJ = false;
+      }
+      if (st.basePts && st.baseCum && st.junctionAlong !== null && st.drone && (st.phase === "scan" || st.phase === "transit") && !onDetour) {
         const b = alongRoad(droneAt(st.drone, st.simTime), st.basePts, st.baseCum);
-        if (b.dist < 25 && b.along > st.junctionAlong + 3) {
+        // 실제 드론이 갈림길에 닿았으면 그 뒤로는 화면 위치를 갈림길로 끌어온다
+        // (우회로에 들어간 실제 위치를 기존 선에 비추면 갈림길 조금 뒤로 나와, 화면 위치가 갈림길에 못 닿고 멈춰 있었다)
+        // (빠른 배속에서는 장면 사이에 갈림길을 건너뛸 수 있으므로, 기존 선을 벗어났으면 이미 갈림길을 지난 것으로 본다)
+        if (b.along <= st.junctionAlong + 3 || b.dist > 25) reachedJ = true;
+        // 화면 위치가 갈림길에서 멀리 떨어진 채 기존 선을 벗어났으면(드론을 바꿔 보거나 시간을 건너뛴 경우) 바로 우회선으로
+        if ((b.dist > 60 && Math.abs(alongDisp - st.junctionAlong) > 300) || alongDisp <= st.junctionAlong + 1) onDetour = true;
+        else {
           R = { pts: st.basePts, cum: st.baseCum };
           onBase = true;
+          holdBase = true;
         }
       }
       // 영상 속 길을 지금 쓰는 경로 선 방향대로 — 선이 바뀔 때만 다시 계산
@@ -329,34 +362,60 @@ export default function DroneVisionFeed({
         if (fk) {
           const main = onBase ? fk.base : fk.det;
           const other = onBase ? fk.det : fk.base;
-          scene.setBranches([{ atWy: 2000 + main.junction * UPM, step: PATH_STEP_M * UPM, theta: other.branch }]);
+          scene.setBranches([{ atWy: 2000 + other.at * UPM, step: PATH_STEP_M * UPM, theta: other.branch }]);
+          // 저쪽 경로 장면: 저쪽 길이 큰길(길가 건물·보도·차까지), 지금 길이 갈림길 — 갈림길을 지난 뒤 보일 모습 그대로
+          sceneO.setPath({ wy0: 2000, step: PATH_STEP_M * UPM, theta: other.th });
+          sceneO.setBranches([{ atWy: 2000 + main.at * UPM, step: PATH_STEP_M * UPM, theta: main.branch }]);
         }
       }
 
       // 드론 위치 → 가상 장면 위치: 순항·정찰 모두 소방차 경로를 따라 실제로 간 거리로 (속도가 갑자기 바뀌지 않게)
       // 경로가 바뀌는 순간(우회 승인) 생기는 작은 차이는 부드럽게 따라간다
       const flying = st.phase === "transit" || st.phase === "scan";
-      const target = flying && st.drone ? alongRoad(droneAt(st.drone, st.simTime), R.pts, R.cum).along : 0;
+      // 기존 선을 붙잡고 있는 동안은 갈림길보다 앞으로(이미 우회로에 들어간 실제 위치가 기존 선에 비쳐) 가지 않게
+      const jMin = holdBase && st.junctionAlong !== null ? st.junctionAlong : -Infinity;
+      // 갈림길보다 3m 앞을 목표로 — 화면 위치가 갈림길(+1m)을 금방 넘어 우회선으로 바뀐다(모퉁이에서 오래 멈칫하지 않게)
+      const jHold = holdBase && reachedJ ? jMin - 3 : null;
+      const target = flying && st.drone ? jHold ?? Math.max(jMin, alongRoad(droneAt(st.drone, st.simTime), R.pts, R.cum).along) : 0;
       // 진행 방향: 2초 뒤(시뮬레이션) 경로상 위치가 줄면 되돌아가는 중 → 카메라를 뒤로 돌린다
       if (flying && st.drone) {
-        const ahead = alongRoad(droneAt(st.drone, st.simTime + 2), R.pts, R.cum).along;
+        const ahead = jHold ?? Math.max(jMin, alongRoad(droneAt(st.drone, st.simTime + 2), R.pts, R.cum).along);
         if (ahead < target - 0.5) turnTarget = Math.PI;
         else if (ahead > target + 0.5) turnTarget = 0;
       } else turnTarget = 0;
+      // 배속에 맞춰 따라가는 빠르기를 올린다 — 빠른 배속(×20·×60)에서 화면 위치가 100m 넘게 늦어져 갈림길에서 건너뛰던 문제
+      if (dt > 0 && lastSim !== null && st.simTime >= lastSim) simRate += ((st.simTime - lastSim) / dt - simRate) * Math.min(1, dt * 2);
+      lastSim = st.simTime;
+      const fast = Math.max(1, Math.min(15, simRate / 5));
       if (!flying || Math.abs(target - alongDisp) > 400) alongDisp = target;
-      else alongDisp += (target - alongDisp) * Math.min(1, dt * 3);
+      else alongDisp += (target - alongDisp) * Math.min(1, dt * 3 * fast);
       const droneAlong = alongDisp;
       const s = 2000 + droneAlong * UPM;
       // 카메라 방향: 가는 쪽 길 방향(되돌아갈 때는 뒤쪽 길 방향 + 180°)을 따라간다.
       // 크게 돌 때(뒤돌기)는 일정한 속도로 돌고, 길 굽이는 바로 따라간다. 늘 짧은 쪽으로 돈다.
       const back = turnTarget > 1 ? -1 : 1;
-      const camWant = 0.75 * scene.frame(s + 30 * back).angle + 0.25 * scene.frame(s + 90 * back).angle + (back < 0 ? Math.PI : 0);
+      let camWant = 0.75 * scene.frame(s + 30 * back).angle + 0.25 * scene.frame(s + 90 * back).angle + (back < 0 ? Math.PI : 0);
+      // 갈림길로 되돌아오는 동안: 40m 전부터 미리 그린 우회로 쪽으로 조금씩 돌아, 갈림길에서는 우회로 진행 방향을 본다
+      // (갈림길에서 우회선으로 바꾼 뒤 카메라가 보는 방향과 같아 끊기지 않는다)
+      if (holdBase && st.fork && st.junctionAlong !== null) {
+        const J = st.junctionAlong;
+        const w = Math.max(0, Math.min(1, 1 - (droneAlong - J) / 40));
+        if (w > 0) {
+          const det = st.fork.det;
+          const dj = det.junction;
+          const detWant = 0.75 * forkDir(det, dj + 30 / UPM) + 0.25 * forkDir(det, dj + 90 / UPM);
+          let d = detWant - camWant;
+          d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+          const e = w * w * (3 - 2 * w); // 처음과 끝을 부드럽게
+          camWant += d * e;
+        }
+      }
       if (camDisp === null || !flying) camDisp = camWant;
       else {
         let diff = camWant - camDisp;
         diff -= 2 * Math.PI * Math.round(diff / (2 * Math.PI));
-        if (Math.abs(diff) > 1) camDisp += Math.sign(diff) * Math.min(Math.abs(diff), dt * 1.8);
-        else camDisp += diff * Math.min(1, dt * 6);
+        if (Math.abs(diff) > 1) camDisp += Math.sign(diff) * Math.min(Math.abs(diff), dt * 1.8 * fast);
+        else camDisp += diff * Math.min(1, dt * 6 * fast);
       }
       // 순항 때는 조금 높이(넓게), 정찰 때는 낮게 — 카메라 각도는 같음
       zoom += ((st.phase === "transit" ? 0.8 : 1) - zoom) * Math.min(1, dt * 3);
@@ -374,7 +433,83 @@ export default function DroneVisionFeed({
       const keepClearWy = scanning
         ? [...parkedAt, st.blockage?.kind === "parking" ? blockAt : null].filter((x): x is number => x !== null)
         : [];
-      const v = scene.draw(ctx, W, H, { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy, camAngle: camDisp });
+      // 갈림길 근처: 저쪽 길 방향(갈림길에서 저쪽 길 쪽 부채꼴)은 저쪽 경로를 큰길로 둔 장면(sceneO)이 맡는다.
+      // 그래야 우회로가 맨 도로가 아니라 길가 건물·보도·차가 있는 거리로 미리 보이고, 갈림길에서 장면을 바꿔도 그대로다
+      // (예전에는 갈림길에 닿는 순간 우회로 주변 건물·도로 모습이 통째로 바뀌어 "이상한 길로 가는" 것처럼 보였다).
+      // 땅·길·차는 화면을 부채꼴 안팎으로 나눠 각 장면이 칠하고, 건물·나무는 세계 위치로 나눈 뒤 두 장면 것을 섞어 먼 것부터 그린다
+      // (화면으로만 자르면 드론 근처 높은 건물이 부채꼴 화면 안으로 크게 덧그려졌다).
+      const drawOpts = { s, zoom, t: flying ? now / 1000 : 0, yieldAmt, blockWy, keepClearWy, camAngle: camDisp };
+      const fkd = st.fork;
+      let v: AerialView;
+      if (fkd && flying && Math.abs(droneAlong - fkd.base.junction) < 250) {
+        const J = fkd.base.junction;
+        const main = onBase ? fkd.base : fkd.det;
+        const other = onBase ? fkd.det : fkd.base;
+        const thAt = (f: ForkLine, m: number) => f.th[Math.max(0, Math.min(f.th.length - 1, Math.round(m / PATH_STEP_M)))];
+        const wrap = (a: number) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+        const aO = thAt(other, J + 20);
+        const dM = wrap(thAt(main, J + 20) - aO);
+        const dB = wrap(thAt(main, J - 20) + Math.PI - aO);
+        // 저쪽 길 방향을 가운데 두고, 이쪽 길 남은 방향·들어온 길 방향과의 가운데 선까지
+        let a1 = aO + dM / 2;
+        let a2 = aO + dB / 2;
+        if (Math.sign(dM) === Math.sign(dB)) {
+          a1 = aO - 0.9;
+          a2 = aO + 0.9;
+        }
+        const span = wrap(a2 - a1) || 0.01;
+        const [jx, jy] = scene.world(0, 2000 + J * UPM);
+        const inWedge = (x: number, y: number) => {
+          const d = wrap(Math.atan2(x - jx, y - jy) - a1);
+          return span > 0 ? d >= 0 && d <= span : d <= 0 && d >= span;
+        };
+        const ring: [number, number][] = [];
+        const ray = (a: number, out: boolean) => {
+          const rs = [0, 20, 50, 100, 180, 300, 500, 800, 1300, 2200, 3500];
+          for (const r of out ? rs : [...rs].reverse()) ring.push([jx + r * Math.sin(a), jy + r * Math.cos(a)]);
+        };
+        ray(a1, true);
+        for (let k = 1; k < 12; k++) {
+          const a = a1 + (span * k) / 12;
+          ring.push([jx + 3500 * Math.sin(a), jy + 3500 * Math.cos(a)]);
+        }
+        ray(a2, false);
+        const v0 = scene.view(W, H, s, zoom, 0, camDisp ?? undefined);
+        const wedgePath = (c: CanvasRenderingContext2D) => {
+          ring.forEach(([x, y], i) => {
+            const [px, py] = v0.Mw(x, y);
+            if (i === 0) c.moveTo(px, py);
+            else c.lineTo(px, py);
+          });
+          c.closePath();
+        };
+        const otherSolids: AerialSolid[] = [];
+        sceneO.draw(ctx, W, H, {
+          ...drawOpts,
+          s: 2000 + J * UPM,
+          blockWy: undefined,
+          keepClearWy: [],
+          camXY: scene.world(0, s),
+          region: inWedge,
+          groundClip: (c) => {
+            c.beginPath();
+            wedgePath(c);
+            c.clip();
+          },
+          solidsOut: otherSolids,
+        });
+        v = scene.draw(ctx, W, H, {
+          ...drawOpts,
+          region: (x, y) => !inWedge(x, y),
+          groundClip: (c) => {
+            c.beginPath();
+            c.rect(0, 0, W, H);
+            wedgePath(c);
+            c.clip("evenodd");
+          },
+          extraSolids: otherSolids,
+        });
+      } else v = scene.draw(ctx, W, H, drawOpts);
       // 먼 곳은 옅은 안개 (기울인 카메라의 원근감)
       const haze = ctx.createLinearGradient(0, 0, 0, H * 0.32);
       haze.addColorStop(0, "rgba(214,219,226,0.62)");

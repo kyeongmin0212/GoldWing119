@@ -160,6 +160,25 @@ export interface AerialDrawOpts {
   turn?: number;
   /** 카메라 방향을 직접 정할 때(세계 기준 라디안) — 주면 turn 대신 쓴다. 뒤돌기·갈림길에서 끊김 없이 돌게 하려고 */
   camAngle?: number;
+  /**
+   * 카메라(드론) 위치를 세계 좌표로 직접 줄 때 — 드론이 이 장면의 큰길 위에 있지 않을 때(갈림길 근처에서
+   * 다른 쪽 경로 장면을 함께 그릴 때). 주면 s 는 그릴 범위의 기준으로만 쓰고 앞·뒤 양쪽을 다 그린다.
+   */
+  camXY?: [number, number];
+  /** 세계 좌표 (x, y) 가 이 장면이 맡은 곳인가 — 아니면 그곳의 입체(건물·나무)는 넣지 않는다 (두 장면을 나눠 그릴 때) */
+  region?: (wx: number, wy: number) => boolean;
+  /** 땅·길·차를 그리기 전에 화면 클립을 건다 — 입체는 클립 없이 그린다 (가까운 건물이 경계 너머로 솟아도 잘리지 않게) */
+  groundClip?: (ctx: CanvasRenderingContext2D) => void;
+  /** 주면 입체를 그리지 않고 여기에 담아 돌려준다 (다른 장면의 입체와 함께 먼 것부터 그리려고) */
+  solidsOut?: AerialSolid[];
+  /** 다른 장면에서 받은 입체 — 이 장면 입체와 섞어 먼 것부터 그린다 (같은 카메라여야 한다) */
+  extraSolids?: AerialSolid[];
+}
+
+/** 입체 하나: 카메라에서 거리² 와 그리는 함수 */
+export interface AerialSolid {
+  d: number;
+  f: () => void;
 }
 
 const SHOP_ROOF = ["#d9d6cf", "#c9ccd1", "#e4e0d6", "#b9bdc2", "#d3cbbd", "#cfc7b8"];
@@ -219,7 +238,10 @@ export function createAerialScene(seed = 1) {
     }
     path = { wy0: p.wy0, step: p.step, th, px, py };
     branches = [];
+    cornerCache.clear();
   }
+  /** 안쪽 모퉁이 건물 자리 (꺾임 가운데 wy → 자리, 못 세우면 null) — 길·갈림길이 바뀌면 비운다 */
+  const cornerCache = new Map<number, { R: { x: number; y: number; a: number }; side: number; u0: number; hw: number; depth: number } | null>();
 
   /**
    * 갈림길 도로 — 지금 따라가는 길(큰길)에서 갈라지는 실제 우회로(또는 우회 뒤엔 막힌 기존 길)를 미리 그려 둔다.
@@ -229,6 +251,7 @@ export function createAerialScene(seed = 1) {
   let branches: { x: number[]; y: number[]; a: number[]; hits: { u: number; wy: number }[] }[] = [];
   function setBranches(list: RoadBranch[]) {
     branches = [];
+    cornerCache.clear();
     if (!path) return;
     for (const b of list) {
       if (b.theta.length < 2) continue;
@@ -297,8 +320,28 @@ export function createAerialScene(seed = 1) {
     const [cx, , angle] = center(wy);
     return { cx, angle };
   };
+  /**
+   * 모퉁이 건물용 곧은 틀 — 켜져 있는 동안 world() 는 (u, wy) 를 이 점(x, y)·방향(a) 기준의 곧은 좌표
+   * (옆으로 u, 앞으로 wy)로 본다. 꺾이는 곳은 도로 좌표가 부채꼴로 늘어나거나(바깥쪽) 접히므로(안쪽),
+   * 거기 세우는 건물은 이 틀 안에서 반듯한 상자로 그린다. 기본은 꺼짐(null) — 그리기 도구 안에서만 잠깐 켠다.
+   */
+  type Rigid = { x: number; y: number; a: number };
+  let rigid: Rigid | null = null;
+  const withRigid = (r: Rigid | null, f: () => void) => {
+    const prev = rigid;
+    rigid = r;
+    try {
+      f();
+    } finally {
+      rigid = prev;
+    }
+  };
   /** 도로 좌표 → 세계 좌표 (중심선에서 오른쪽 법선 방향으로 u 만큼) */
   const world = (u: number, wy: number): P => {
+    if (rigid) {
+      const { x: rx, y: ry, a: ra } = rigid;
+      return [rx + u * Math.cos(ra) + wy * Math.sin(ra), ry - u * Math.sin(ra) + wy * Math.cos(ra)];
+    }
     const [x, y, a, kap] = center(wy);
     // 급하게 꺾이는 곳 안쪽은 굽은 반지름보다 멀리 두면 접혀 보이므로 반지름 안쪽으로 눌러 둔다
     if (u * kap > 0.85) u = 0.85 / kap;
@@ -330,7 +373,7 @@ export function createAerialScene(seed = 1) {
    * 기울인 카메라(핀홀) 투영. 순항·정찰 모두 앞으로 기울인 같은 각도(수평에서 약 42° 아래)로 본다.
    * zoom 1 = 정찰(낮게), 작을수록 높이 떠서 넓게 본다. 화면 가운데(cy)에 드론 위치(s)가 오고, 화면 위쪽일수록 앞쪽 먼 곳이 작게 보인다.
    */
-  function makeView(W: number, H: number, s: number, zoom: number, turn = 0, camAbs?: number): AerialView {
+  function makeView(W: number, H: number, s: number, zoom: number, turn = 0, camAbs?: number, camXY?: [number, number]): AerialView {
     // 카메라 방향을 직접 받으면, 그 지점 길 방향과의 차이를 turn 으로 본다 (그릴 범위 앞/뒤 판단용)
     if (camAbs !== undefined) turn = camAbs - center(s)[2];
     // 화면 가운데 배율 — 영상 칸이 납작하면(노트북 화면) 높이 기준으로 줄여 카메라를 조금 높이 띄운다.
@@ -348,7 +391,7 @@ export function createAerialScene(seed = 1) {
     const cx = W / 2;
     const cy = H * 0.8; // 드론 위치를 화면 아래쪽에 — 앞쪽을 넓게 본다 (정찰 때 앞 약 50m)
     // 화면 가운데 지점과 카메라 방향 — 카메라는 조금 앞쪽 길 방향을 보며 돌아간다 (꺾이는 곳에서 미리 돈다)
-    const [camX, camY] = path ? center(s) : [roadX(s + 25), s];
+    const [camX, camY] = camXY ?? (path ? center(s) : [roadX(s + 25), s]);
     // 되돌아가는 중(turn > 90°)이면 뒤쪽 길 방향을 미리 본다
     const back = Math.cos(turn) < 0 ? -1 : 1;
     const camAngle = camAbs ?? 0.75 * center(s + 30 * back)[2] + 0.25 * center(s + 90 * back)[2] + turn;
@@ -428,14 +471,19 @@ export function createAerialScene(seed = 1) {
     const backMin = s - (Math.min(fTop, h * 12) - lookAhead) - 60;
     const backMax = s - (fBot - lookAhead) + 60;
     const ct = Math.cos(turn);
-    const wyMin = ct > 0.95 ? fwdMin : ct < -0.95 ? backMin : Math.min(fwdMin, backMin);
-    const wyMax = ct > 0.95 ? fwdMax : ct < -0.95 ? backMax : Math.max(fwdMax, backMax);
+    const both = !!camXY; // 카메라가 큰길 밖이면 앞·뒤 판단이 맞지 않으므로 양쪽 다
+    const wyMin = both ? Math.min(fwdMin, backMin) : ct > 0.95 ? fwdMin : ct < -0.95 ? backMin : Math.min(fwdMin, backMin);
+    const wyMax = both ? Math.max(fwdMax, backMax) : ct > 0.95 ? fwdMax : ct < -0.95 ? backMax : Math.max(fwdMax, backMax);
     /**
      * 입체 차량: 건물과 같은 투영으로 낮은 상자(차체) + 그 위 작은 상자(유리 객실)를 그린다.
      * 어느 방향으로 달려도 카메라 쪽 옆면·앞뒤면이 제 방향(화면 아래쪽)에 붙는다. 번호판은 카메라 쪽 앞·뒷면에.
      * 차 로컬 좌표: x = 오른쪽, y = 뒤쪽(앞은 -y), 단위는 세계 단위.
      */
     const car: AerialView["car"] = (ctx, u, wy, extra, color, flip = 0, opt = {}) => {
+      // 화면 아래 끝보다 한참 뒤(카메라 바로 밑·뒤, 또는 굽은 길이 돌아 나와 카메라 뒤로 오는 곳)의 차는 그리지 않는다.
+      // 거기서는 투영이 극단적으로 커져, 지붕·끝면을 그리는 평면 변환(onPlane·onEnd)이 화면 전체를 덮었다
+      // (재생 중 한 장면씩 화면이 하얗게·검게 번지던 깜빡임). 차 반 길이(최대 15)+높이 여유를 두어 걸친 차는 그린다.
+      if (ground(u, wy)[1] < fBot - 45) return;
       const hd = extra + flip;
       const fu = Math.sin(hd); // 앞 방향 (도로 좌표)
       const fw = Math.cos(hd);
@@ -688,12 +736,17 @@ export function createAerialScene(seed = 1) {
   }
 
   function draw(ctx: Ctx, W: number, H: number, o: AerialDrawOpts): AerialView {
-    const v = makeView(W, H, o.s, o.zoom, o.turn ?? 0, o.camAngle);
+    const v = makeView(W, H, o.s, o.zoom, o.turn ?? 0, o.camAngle, o.camXY);
     const { k, M } = v;
     const yLo = v.wyMin;
     const yHi = v.wyMax;
 
     ctx.save();
+    // 나눠 그릴 때: 땅·길·차는 이 장면이 맡은 화면 부분에만
+    if (o.groundClip) {
+      ctx.save();
+      o.groundClip(ctx);
+    }
     ctx.fillStyle = "#c3bfb5";
     ctx.fillRect(0, 0, W, H);
 
@@ -719,14 +772,20 @@ export function createAerialScene(seed = 1) {
 
     // ── 입체(건물·나무) 그리기 도구 ──
     /** 그림자 모양(땅 위, 도로 좌표) — 모아 두었다가 길을 그린 다음 한 번에 칠한다 */
-    const shadowPolys: P[][] = [];
+    const shadowPolys: { pts: P[]; rg: Rigid | null }[] = [];
     /** 입체들 — 길·차 다음에 먼 것부터 그린다 (가까운 건물이 먼 것을 가림) */
-    const solids: { d: number; f: () => void }[] = [];
+    const solids: AerialSolid[] = [];
     const addSolid = (u: number, wy: number, f: () => void) => {
       const [sx] = M(u, wy);
       if (sx < -W * 0.7 || sx > W * 1.7) return;
+      if (o.region) {
+        const [wx, wyy] = world(u, wy);
+        if (!o.region(wx, wyy)) return;
+      }
       const [l, ff] = v.ground(u, wy);
-      solids.push({ d: l * l + ff * ff, f });
+      // 곧은 틀(모퉁이 건물) 안에서 넣은 입체는 나중에 그릴 때도 같은 틀로
+      const rg = rigid;
+      solids.push({ d: l * l + ff * ff, f: rg ? () => withRigid(rg, f) : f });
     };
     /** 꼭짓점(높이 포함)들이 땅에 드리우는 그림자 */
     const castShadow = (pts: V3[]) => {
@@ -735,7 +794,7 @@ export function createAerialScene(seed = 1) {
         flat.push([u, wy]);
         if (z > 0) flat.push([u + SHADOW_U * z, wy + SHADOW_W * z]);
       }
-      shadowPolys.push(hull(flat));
+      shadowPolys.push({ pts: hull(flat), rg: rigid });
     };
     /** 창문 같은 잔무늬는 가까이(크게) 보일 때만 */
     const fine = (u: number, wy: number) => v.kAt(u, wy) > 1.05;
@@ -880,7 +939,7 @@ export function createAerialScene(seed = 1) {
       const sw = wy + SHADOW_W * zt;
       const circ: P[] = [];
       for (let a = 0; a < 10; a++) circ.push([su + r * Math.cos((a / 10) * Math.PI * 2), sw + r * Math.sin((a / 10) * Math.PI * 2)]);
-      shadowPolys.push(circ);
+      shadowPolys.push({ pts: circ, rg: rigid });
       addSolid(u, wy, () => {
         const [bx, by] = M(u, wy);
         const [x, y] = v.M3(u, wy, zt);
@@ -939,6 +998,219 @@ export function createAerialScene(seed = 1) {
     }
 
     // 2) 땅(마당·주차장·공원)은 지금 칠하고, 건물·나무(입체)와 그 그림자는 모아 두었다가 길·차 다음에
+    /** 앞줄 상가: 1~3층 평지붕, 1층 유리창 + 간판 띠, 위층 창문, 옥상 실외기 (maxDepth: 모퉁이에서 깊이 제한) */
+    const drawShop = (side: number, uIn: number, y0: number, y1: number, id: number, maxDepth = Infinity) => {
+      const r = hash(id, 40, seed);
+      const ym = (y0 + y1) / 2;
+      const depth = Math.min(34 + r * 26, maxDepth);
+      const uOut = uIn + side * depth;
+      const floors = 1 + Math.floor(hash(id, 41, seed) * 3);
+      const zt = floors * 13 + 2;
+      const roof = SHOP_ROOF[Math.floor(r * SHOP_ROOF.length)];
+      const sign = SIGN[Math.floor(hash(id, 50, seed) * SIGN.length)];
+      const wall = SHOP_WALL[Math.floor(hash(id, 42, seed) * SHOP_WALL.length)];
+      castShadow([
+        [uIn, y0, zt],
+        [uOut, y0, zt],
+        [uOut, y1, zt],
+        [uIn, y1, zt],
+      ]);
+      addSolid((uIn + uOut) / 2, ym, () => {
+        const det = fine(uIn, ym);
+        const upper: [number, number][] = [];
+        for (let f = 1; f < floors; f++) upper.push([13 * f + 3.5, 13 * f + 9.5]);
+        const um = uIn + side * depth * 0.55;
+        drawBox(
+          uIn,
+          uOut,
+          y0,
+          y1,
+          0,
+          zt,
+          wall,
+          roof,
+          (w) => {
+            if (w.kind === "in") {
+              if (det) panes(w, [[1.2, 8.8]], Math.max(2, Math.round(w.len / 9)), GLASS, 0.04, 0.05);
+              band(w, 9.3, 12.5, sign);
+              if (det) band(w, 10.3, 11.5, "rgba(255,255,255,0.78)", 0.3, 0.7);
+              if (det && upper.length) panes(w, upper, Math.max(2, Math.floor(w.len / 9)), WINDOW);
+            } else if (w.kind === "near") {
+              band(w, 9.3, 12.5, sign, 0, 0.12);
+              if (det && upper.length) panes(w, upper, Math.max(1, Math.floor(w.len / 12)), WINDOW);
+            }
+          },
+          () => drawBox(um, um + side * depth * 0.2, y0 + (y1 - y0) * 0.25, y0 + (y1 - y0) * 0.5, zt, zt + 3.5, "#9aa0a6", "#b7bcc1"),
+        );
+      });
+    };
+    /** 앞줄 주택: 마당·담장 + 2층 박공지붕 집 */
+    const drawHouse = (side: number, uIn: number, y0: number, y1: number, id: number) => {
+      const r = hash(id, 40, seed);
+      const ym = (y0 + y1) / 2;
+      const setback = 8 + r * 8;
+      const depth = 30 + r * 14;
+      const hIn = uIn + side * setback;
+      const hOut = hIn + side * depth;
+      const lotOut = hOut + side * 10;
+      const roof = HOUSE_ROOF[Math.floor(hash(id, 60, seed) * HOUSE_ROOF.length)];
+      const wall = HOUSE_WALL[Math.floor(hash(id, 63, seed) * HOUSE_WALL.length)];
+      const zw = 11 + hash(id, 61, seed) * 4;
+      const zr = zw + 6 + hash(id, 62, seed) * 3;
+      const mid = (hIn + hOut) / 2;
+      fillQuad(uIn, lotOut, y0, y1, "#9caf7a");
+      ctx.strokeStyle = "#ddd8cb";
+      ctx.lineWidth = Math.max(1, 1.5 * k);
+      ctx.stroke();
+      castShadow([
+        [hIn, y0 + 4, zw],
+        [hOut, y0 + 4, zw],
+        [hOut, y1 - 4, zw],
+        [hIn, y1 - 4, zw],
+        [mid, y0 + 4, zr],
+        [mid, y1 - 4, zr],
+      ]);
+      addSolid(mid, ym, () => {
+        const det = fine(hIn, ym);
+        drawGable(hIn, hOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
+          if (!det) return;
+          if (w.kind === "in") {
+            panes(w, [[3.5, 7.5]], 2, WINDOW, 0.12, 0.25);
+            band(w, 0, 6.5, "#6b4f3a", 0.46, 0.56);
+          } else if (w.kind === "near") panes(w, [[3.5, 7.5]], 1, WINDOW, 0.25, 0.25);
+        });
+      });
+      if (r > 0.4) tree3(uIn + side * (setback * 0.45), y0 + (y1 - y0) * (0.3 + 0.4 * hash(id, 70, seed)), 5 + r * 3);
+    };
+    /** 뒷줄: 주택 / 빌라 / 주차장 / 공원 (noOpen: 주차장·공원 대신 집이나 빌라만, at·maxDepth: 모퉁이 건물 자리) */
+    const drawBack = (side: number, y0: number, y1: number, id: number, noOpen = false, at = ROAD_HALF + SIDEWALK + 72, maxDepth = Infinity) => {
+      const ym = (y0 + y1) / 2;
+      const backIn = side * at;
+      const backKind = noOpen ? hash(id, 80, seed) * 0.75 : hash(id, 80, seed);
+      const bOut = backIn + side * Math.min(48 + hash(id, 81, seed) * 30, maxDepth);
+      if (backKind < 0.45) {
+        const roof = HOUSE_ROOF[Math.floor(hash(id, 82, seed) * HOUSE_ROOF.length)];
+        const wall = HOUSE_WALL[Math.floor(hash(id, 84, seed) * HOUSE_WALL.length)];
+        const hIn = backIn + side * 6;
+        const zw = 10 + hash(id, 85, seed) * 4;
+        const zr = zw + 6 + hash(id, 86, seed) * 3;
+        const mid = (hIn + bOut) / 2;
+        fillQuad(backIn, bOut + side * 8, y0, y1, "#a3b384");
+        castShadow([
+          [hIn, y0 + 4, zw],
+          [bOut, y0 + 4, zw],
+          [bOut, y1 - 4, zw],
+          [hIn, y1 - 4, zw],
+          [mid, y0 + 4, zr],
+          [mid, y1 - 4, zr],
+        ]);
+        addSolid(mid, ym, () => {
+          const det = fine(hIn, ym);
+          drawGable(hIn, bOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
+            if (det && (w.kind === "in" || w.kind === "near")) panes(w, [[3.5, 7.5]], w.kind === "in" ? 2 : 1, WINDOW, 0.15, 0.25);
+          });
+        });
+      } else if (backKind < 0.75) {
+        // 빌라: 3~4층, 1층 필로티(주차), 층마다 창문·베란다, 옥상 계단실
+        const floors = 3 + (hash(id, 87, seed) < 0.4 ? 1 : 0);
+        const zt = floors * 11 + 2;
+        const wall = VILLA_WALL[Math.floor(hash(id, 88, seed) * VILLA_WALL.length)];
+        const roof = VILLA_ROOF[Math.floor(hash(id, 83, seed) * VILLA_ROOF.length)];
+        castShadow([
+          [backIn, y0, zt],
+          [bOut, y0, zt],
+          [bOut, y1, zt],
+          [backIn, y1, zt],
+        ]);
+        addSolid((backIn + bOut) / 2, ym, () => {
+          const det = fine(backIn, ym);
+          const rows: [number, number][] = [];
+          for (let f = 1; f < floors; f++) rows.push([11 * f + 3, 11 * f + 8.5]);
+          const um = (backIn + bOut) / 2;
+          drawBox(
+            backIn,
+            bOut,
+            y0,
+            y1,
+            0,
+            zt,
+            wall,
+            roof,
+            (w) => {
+              if (w.kind !== "in" && w.kind !== "near") return;
+              if (w.kind === "in") band(w, 0, 8.5, "#4a4f57", 0.06, 0.94);
+              if (!det) return;
+              panes(w, rows, Math.max(2, Math.floor(w.len / 11)), WINDOW, 0.08, 0.18);
+              if (w.kind === "in") for (const [z0] of rows) band(w, z0 - 1.6, z0 - 0.4, "rgba(255,255,255,0.35)", 0.04, 0.96);
+            },
+            () => drawBox(um, um + side * 10, y0 + (y1 - y0) * 0.3, y0 + (y1 - y0) * 0.55, zt, zt + 7, wall, "#7f8b98"),
+          );
+        });
+      } else if (backKind < 0.9) {
+        fillQuad(backIn, bOut, y0, y1, pat);
+        for (let py = y0 + 3; py < y1 - 10; py += 12) {
+          if (hash(Math.round(py), id, seed) < 0.35) continue;
+          v.car(ctx, (backIn + bOut) / 2, py + 5, Math.PI / 2, CAR[Math.floor(hash(Math.round(py), id + 1, seed) * CAR.length)]);
+        }
+      } else {
+        fillQuad(backIn, bOut, y0, y1, "#8fae6c");
+        tree3((backIn + bOut) / 2, ym, 9);
+      }
+    };
+    /** 곧은 틀 R 의 (u0~u1, t0~t1) 상자 안(여유 m)으로 갈림길 도로 중심선이 지나가는가 — 우회로 입구에 건물을 세우지 않는다 */
+    const branchInRect = (R: Rigid, u0: number, u1: number, t0: number, t1: number, m: number) => {
+      const ca = Math.cos(R.a);
+      const sa = Math.sin(R.a);
+      const ua = Math.min(u0, u1) - m;
+      const ub = Math.max(u0, u1) + m;
+      const ta = Math.min(t0, t1) - m;
+      const tb = Math.max(t0, t1) + m;
+      for (const b of branches)
+        for (let i = 0; i < b.x.length; i++) {
+          const dx = b.x[i] - R.x;
+          const dy = b.y[i] - R.y;
+          const du = dx * ca - dy * sa;
+          const dt = dx * sa + dy * ca;
+          if (du > ua && du < ub && dt > ta && dt < tb) return true;
+        }
+      return false;
+    };
+    /** 이 칸 범위에서 길이 어느 쪽으로 도는가 (+1 오른쪽, -1 왼쪽) — 안쪽 = 도는 쪽 */
+    const turnSign = (y0: number, y1: number) => {
+      let sum = 0;
+      for (let y = y0; y <= y1; y += 4) sum += center(y)[3];
+      return Math.sign(sum);
+    };
+    const FRONT_IN = ROAD_HALF + SIDEWALK;
+    /**
+     * 꺾이는 곳의 길가 칸: 짧은 조각(약 20단위)으로 나눠, 조각마다 그 지점 길 방향에 맞춘 곧은 틀에서 반듯한 상가·주택을 세운다.
+     * 바깥쪽은 조각 사이가 부채꼴로 벌어져 앞줄·뒷줄 모두 들어간다. 안쪽은 반지름이 넉넉한(완만한) 곳만 — 급한 안쪽은 모퉁이 건물이 맡는다.
+     */
+    const bendLots = (side: -1 | 1, y0: number, y1: number, id: number, frontKind: "shop" | "house") => {
+      const inner = turnSign(y0 - 20, y1 + 20) === side;
+      const pieces = Math.max(1, Math.round((y1 - y0) / 20));
+      const step = (y1 - y0) / pieces;
+      for (let q = 0; q < pieces; q++) {
+        const pid = id * 7 + 3 + q * 2;
+        const ym = y0 + step * (q + 0.5);
+        const [cx, cy, a, kp] = center(ym);
+        const R: Rigid = { x: cx, y: cy, a };
+        // 앞줄은 FRONT_IN, 뒷줄은 그보다 72 바깥에서 길이를 잰다: 바깥쪽은 길어지고 안쪽은 짧아진다
+        const scale = (u: number) => 1 + (inner ? -1 : 1) * Math.abs(kp) * u;
+        const frontDepth = frontKind === "shop" ? 60 : 62;
+        const frontOk = !inner || Math.abs(kp) * (FRONT_IN + frontDepth) < 0.3;
+        const backOk = !inner || Math.abs(kp) * (BACK_U - 20) < 0.3;
+        const hf = (step * scale(FRONT_IN) * 0.94) / 2;
+        const hb = (step * scale(FRONT_IN + 72) * 0.94) / 2;
+        withRigid(R, () => {
+          if (frontOk && hf > 7 && !branchInRect(R, side * FRONT_IN, side * (FRONT_IN + frontDepth), -hf, hf, FRONT_IN + 6)) {
+            if (frontKind === "shop") drawShop(side, side * FRONT_IN, -hf, hf, pid);
+            else drawHouse(side, side * FRONT_IN, -hf, hf, pid);
+          }
+          if (backOk && hb > 7 && !branchInRect(R, side * (FRONT_IN + 72), side * (FRONT_IN + 150), -hb, hb, FRONT_IN + 6)) drawBack(side, -hb, hb, pid, true);
+        });
+      }
+    };
     for (let i = i0; i <= i1; i++) {
       const alleys = alleysOf(i);
       for (const side of [-1, 1] as const) {
@@ -956,177 +1228,108 @@ export function createAerialScene(seed = 1) {
           // 갈림길 도로가 지나가는 칸은 비워 둔다 (앞줄·뒷줄 따로)
           const frontHit = onBranch(side, ROAD_HALF + SIDEWALK, ROAD_HALF + SIDEWALK + 72, y0, y1);
           const backHit = onBranch(side, ROAD_HALF + SIDEWALK + 72, BACK_U + 50, y0, y1);
-          // 교차로에서 도는 곳은 건물 대신 모퉁이 공원(잔디·나무) — 길을 따라 놓은 건물은 바깥쪽이 부채꼴로 늘어나고
-          // 안쪽은 접혀 보이지만, 평평한 잔디와 둥근 나무는 꺾여도 어색하지 않다
+          // 교차로에서 도는 곳: 길을 따라 놓은 건물은 바깥쪽이 부채꼴로 늘어나고 안쪽은 접혀 보이므로,
+          // 잔디를 깔고 그 위에 꺾인 길 방향에 맞춘 반듯한 상가·주택을 세운다 (bendLots, 급한 안쪽은 cornerAt)
           if (bendAt(y0 - 20, y1 + 20) * BACK_U > 0.35) {
             fillQuad(side * (ROAD_HALF + SIDEWALK), side * (BACK_U + 220), y0 - 2, y1 + 2, "#9caf7a");
-            const kap = center((y0 + y1) / 2)[3];
-            for (let q = 0; q < 4 && !frontHit && !backHit; q++) {
-              const tu = side * (ROAD_HALF + SIDEWALK + 12 + q * 38 + hash(id, 140 + q, seed) * 14);
-              if (tu * kap > 0.6) continue; // 안쪽 모퉁이 깊은 곳은 눌려 있어 나무가 겹친다
-              tree3(tu, y0 + (y1 - y0) * (0.2 + 0.6 * hash(id, 150 + q, seed)), 6 + hash(id, 160 + q, seed) * 4);
-            }
+            bendLots(side, y0, y1, id, frontKind);
             continue;
           }
-          const r = hash(id, 40, seed);
-          const uIn = side * (ROAD_HALF + SIDEWALK);
-          const ym = (y0 + y1) / 2;
           if (frontHit) {
             // 갈림길 도로 자리 — 건물 없음
-          } else if (frontKind === "shop") {
-            // 상가: 1~3층 평지붕, 1층 유리창 + 간판 띠, 위층 창문, 옥상 실외기
-            const depth = 34 + r * 26;
-            const uOut = uIn + side * depth;
-            const floors = 1 + Math.floor(hash(id, 41, seed) * 3);
-            const zt = floors * 13 + 2;
-            const roof = SHOP_ROOF[Math.floor(r * SHOP_ROOF.length)];
-            const sign = SIGN[Math.floor(hash(id, 50, seed) * SIGN.length)];
-            const wall = SHOP_WALL[Math.floor(hash(id, 42, seed) * SHOP_WALL.length)];
-            castShadow([
-              [uIn, y0, zt],
-              [uOut, y0, zt],
-              [uOut, y1, zt],
-              [uIn, y1, zt],
-            ]);
-            addSolid((uIn + uOut) / 2, ym, () => {
-              const det = fine(uIn, ym);
-              const upper: [number, number][] = [];
-              for (let f = 1; f < floors; f++) upper.push([13 * f + 3.5, 13 * f + 9.5]);
-              const um = uIn + side * depth * 0.55;
-              drawBox(
-                uIn,
-                uOut,
-                y0,
-                y1,
-                0,
-                zt,
-                wall,
-                roof,
-                (w) => {
-                  if (w.kind === "in") {
-                    if (det) panes(w, [[1.2, 8.8]], Math.max(2, Math.round(w.len / 9)), GLASS, 0.04, 0.05);
-                    band(w, 9.3, 12.5, sign);
-                    if (det) band(w, 10.3, 11.5, "rgba(255,255,255,0.78)", 0.3, 0.7);
-                    if (det && upper.length) panes(w, upper, Math.max(2, Math.floor(w.len / 9)), WINDOW);
-                  } else if (w.kind === "near") {
-                    band(w, 9.3, 12.5, sign, 0, 0.12);
-                    if (det && upper.length) panes(w, upper, Math.max(1, Math.floor(w.len / 12)), WINDOW);
-                  }
-                },
-                () => drawBox(um, um + side * depth * 0.2, y0 + (y1 - y0) * 0.25, y0 + (y1 - y0) * 0.5, zt, zt + 3.5, "#9aa0a6", "#b7bcc1"),
-              );
-            });
-          } else {
-            // 주택: 마당·담장 + 2층 박공지붕 집
-            const setback = 8 + r * 8;
-            const depth = 30 + r * 14;
-            const hIn = uIn + side * setback;
-            const hOut = hIn + side * depth;
-            const lotOut = hOut + side * 10;
-            const roof = HOUSE_ROOF[Math.floor(hash(id, 60, seed) * HOUSE_ROOF.length)];
-            const wall = HOUSE_WALL[Math.floor(hash(id, 63, seed) * HOUSE_WALL.length)];
-            const zw = 11 + hash(id, 61, seed) * 4;
-            const zr = zw + 6 + hash(id, 62, seed) * 3;
-            const mid = (hIn + hOut) / 2;
-            fillQuad(uIn, lotOut, y0, y1, "#9caf7a");
-            ctx.strokeStyle = "#ddd8cb";
-            ctx.lineWidth = Math.max(1, 1.5 * k);
-            ctx.stroke();
-            castShadow([
-              [hIn, y0 + 4, zw],
-              [hOut, y0 + 4, zw],
-              [hOut, y1 - 4, zw],
-              [hIn, y1 - 4, zw],
-              [mid, y0 + 4, zr],
-              [mid, y1 - 4, zr],
-            ]);
-            addSolid(mid, ym, () => {
-              const det = fine(hIn, ym);
-              drawGable(hIn, hOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
-                if (!det) return;
-                if (w.kind === "in") {
-                  panes(w, [[3.5, 7.5]], 2, WINDOW, 0.12, 0.25);
-                  band(w, 0, 6.5, "#6b4f3a", 0.46, 0.56);
-                } else if (w.kind === "near") panes(w, [[3.5, 7.5]], 1, WINDOW, 0.25, 0.25);
-              });
-            });
-            if (r > 0.4) tree3(uIn + side * (setback * 0.45), y0 + (y1 - y0) * (0.3 + 0.4 * hash(id, 70, seed)), 5 + r * 3);
-          }
-          // 뒷줄: 주택 / 빌라 / 주차장 / 공원
-          const backIn = side * (ROAD_HALF + SIDEWALK + 72);
-          const backKind = hash(id, 80, seed);
-          const bOut = backIn + side * (48 + hash(id, 81, seed) * 30);
+          } else if (frontKind === "shop") drawShop(side, side * (ROAD_HALF + SIDEWALK), y0, y1, id);
+          else drawHouse(side, side * (ROAD_HALF + SIDEWALK), y0, y1, id);
           if (backHit) {
             // 갈림길 도로 자리 — 건물 없음
-          } else if (backKind < 0.45) {
-            const roof = HOUSE_ROOF[Math.floor(hash(id, 82, seed) * HOUSE_ROOF.length)];
-            const wall = HOUSE_WALL[Math.floor(hash(id, 84, seed) * HOUSE_WALL.length)];
-            const hIn = backIn + side * 6;
-            const zw = 10 + hash(id, 85, seed) * 4;
-            const zr = zw + 6 + hash(id, 86, seed) * 3;
-            const mid = (hIn + bOut) / 2;
-            fillQuad(backIn, bOut + side * 8, y0, y1, "#a3b384");
-            castShadow([
-              [hIn, y0 + 4, zw],
-              [bOut, y0 + 4, zw],
-              [bOut, y1 - 4, zw],
-              [hIn, y1 - 4, zw],
-              [mid, y0 + 4, zr],
-              [mid, y1 - 4, zr],
-            ]);
-            addSolid(mid, ym, () => {
-              const det = fine(hIn, ym);
-              drawGable(hIn, bOut, y0 + 4, y1 - 4, zw, zr, wall, roof[1], (w) => {
-                if (det && (w.kind === "in" || w.kind === "near")) panes(w, [[3.5, 7.5]], w.kind === "in" ? 2 : 1, WINDOW, 0.15, 0.25);
-              });
-            });
-          } else if (backKind < 0.75) {
-            // 빌라: 3~4층, 1층 필로티(주차), 층마다 창문·베란다, 옥상 계단실
-            const floors = 3 + (hash(id, 87, seed) < 0.4 ? 1 : 0);
-            const zt = floors * 11 + 2;
-            const wall = VILLA_WALL[Math.floor(hash(id, 88, seed) * VILLA_WALL.length)];
-            const roof = VILLA_ROOF[Math.floor(hash(id, 83, seed) * VILLA_ROOF.length)];
-            castShadow([
-              [backIn, y0, zt],
-              [bOut, y0, zt],
-              [bOut, y1, zt],
-              [backIn, y1, zt],
-            ]);
-            addSolid((backIn + bOut) / 2, ym, () => {
-              const det = fine(backIn, ym);
-              const rows: [number, number][] = [];
-              for (let f = 1; f < floors; f++) rows.push([11 * f + 3, 11 * f + 8.5]);
-              const um = (backIn + bOut) / 2;
-              drawBox(
-                backIn,
-                bOut,
-                y0,
-                y1,
-                0,
-                zt,
-                wall,
-                roof,
-                (w) => {
-                  if (w.kind !== "in" && w.kind !== "near") return;
-                  if (w.kind === "in") band(w, 0, 8.5, "#4a4f57", 0.06, 0.94);
-                  if (!det) return;
-                  panes(w, rows, Math.max(2, Math.floor(w.len / 11)), WINDOW, 0.08, 0.18);
-                  if (w.kind === "in") for (const [z0] of rows) band(w, z0 - 1.6, z0 - 0.4, "rgba(255,255,255,0.35)", 0.04, 0.96);
-                },
-                () => drawBox(um, um + side * 10, y0 + (y1 - y0) * 0.3, y0 + (y1 - y0) * 0.55, zt, zt + 7, wall, "#7f8b98"),
-              );
-            });
-          } else if (backKind < 0.9) {
-            fillQuad(backIn, bOut, y0, y1, pat);
-            for (let py = y0 + 3; py < y1 - 10; py += 12) {
-              if (hash(Math.round(py), id, seed) < 0.35) continue;
-              v.car(ctx, (backIn + bOut) / 2, py + 5, Math.PI / 2, CAR[Math.floor(hash(Math.round(py), id + 1, seed) * CAR.length)]);
-            }
-          } else {
-            fillQuad(backIn, bOut, y0, y1, "#8fae6c");
-            tree3((backIn + bOut) / 2, ym, 9);
-          }
+          } else drawBack(side, y0, y1, id);
         }
+      }
+    }
+
+    // 2.2) 급하게 꺾이는 곳 안쪽 모퉁이 건물 — 안쪽은 도로 좌표가 접혀 칸을 나눌 수 없으므로,
+    //      꺾임 한가운데 길 방향에 맞춘 곧은 틀에서 차도·갈림길에 닿지 않는 만큼 물려 상가(또는 빌라) 하나를 세운다
+    if (path) {
+      const SCAN = 6;
+      const KAP_MIN = 0.35 / BACK_U;
+      let yb = Math.floor((yLo - 700) / SCAN) * SCAN;
+      const yEnd = yHi + 700;
+      while (yb < yEnd) {
+        const k0 = center(yb)[3];
+        if (Math.abs(k0) < KAP_MIN) {
+          yb += SCAN;
+          continue;
+        }
+        // 같은 방향으로 꺾이는 구간 끝까지: 꺾인 각도 합과 꺾임 가운데(굽은 정도 가중 평균)
+        const sgn = Math.sign(k0);
+        let turn = 0;
+        let wsum = 0;
+        let wy = 0;
+        let ye = yb;
+        for (;;) {
+          const kk = center(ye)[3];
+          if (Math.sign(kk) !== sgn || Math.abs(kk) < KAP_MIN) break;
+          turn += kk * SCAN;
+          wsum += Math.abs(kk);
+          wy += Math.abs(kk) * ye;
+          ye += SCAN;
+        }
+        yb = ye + SCAN;
+        if (Math.abs(turn) < 0.5) continue; // 30° 미만 완만한 굽이는 bendLots 로 충분
+        const wyM = Math.round(wy / wsum / SCAN) * SCAN;
+        if (wyM < yLo - 260 || wyM > yHi + 260) continue;
+        let spot = cornerCache.get(wyM);
+        if (spot === undefined) {
+          spot = null;
+          const [cx, cy, a] = center(wyM);
+          const R: Rigid = { x: cx, y: cy, a };
+          const side = sgn;
+          // 차도 중심선 표본 (꺾임 앞뒤) — 상자 모서리가 차도·보도에 닿는지 본다
+          const samp: { x: number; y: number; wy: number }[] = [];
+          for (let w = wyM - 360; w <= wyM + 360; w += 3) {
+            const c = center(w);
+            samp.push({ x: c[0], y: c[1], wy: w });
+          }
+          const nearest = (u: number, t: number) => {
+            const px = R.x + u * Math.cos(R.a) + t * Math.sin(R.a);
+            const py = R.y - u * Math.sin(R.a) + t * Math.cos(R.a);
+            let best = { d: Infinity, wy: 0 };
+            for (const s of samp) {
+              const d = Math.hypot(px - s.x, py - s.y);
+              if (d < best.d) best = { d, wy: s.wy };
+            }
+            return best;
+          };
+          // 상자 둘레 점들이 모두 보도 바깥이고, 가장 가까운 길 지점이 꺾이는 곳(앞줄·뒷줄이 비워진 칸)인가
+          const fits = (u0: number, hw: number, depth: number) => {
+            for (const fu of [0, 0.5, 1])
+              for (const ft of [-1, -0.5, 0, 0.5, 1]) {
+                const n = nearest(side * (u0 + depth * fu), ft * hw);
+                if (n.d < FRONT_IN + 2) return false;
+                if (bendAt(n.wy - 20, n.wy + 20) * BACK_U <= 0.35) return false;
+              }
+            return !branchInRect(R, side * u0, side * (u0 + depth), -hw, hw, FRONT_IN + 6);
+          };
+          search: for (const [hw, depth] of [
+            [24, 46],
+            [20, 36],
+            [15, 28],
+          ])
+            for (let u0 = FRONT_IN + 2; u0 < FRONT_IN + 70; u0 += 3)
+              if (fits(u0, hw, depth)) {
+                spot = { R, side, u0, hw, depth };
+                break search;
+              }
+          cornerCache.set(wyM, spot);
+        }
+        if (!spot) continue;
+        const { R, side, u0, hw, depth } = spot;
+        const cid = 900000 + Math.round(wyM);
+        withRigid(R, () => {
+          // 건물 앞(차도 쪽)은 포장 마당
+          fillQuad(side * (u0 - 6), side * (u0 + depth + 4), -hw - 4, hw + 4, "#cfc9bc");
+          if (hash(cid, 7, seed) < 0.6) drawShop(side, side * u0, -hw, hw, cid, depth);
+          else drawBack(side, -hw, hw, cid, true, u0, depth); // 빌라나 집
+        });
       }
     }
 
@@ -1237,12 +1440,14 @@ export function createAerialScene(seed = 1) {
 
     // 건물·나무 그림자 — 한 경로로 모아 칠해 겹친 곳도 같은 진하기 (왼쪽 건물 그림자는 보도·차도에 걸친다)
     ctx.beginPath();
-    for (const poly of shadowPolys) {
-      for (let j = 0; j < poly.length; j++) {
-        const [x, yy] = M(poly[j][0], poly[j][1]);
-        if (j === 0) ctx.moveTo(x, yy);
-        else ctx.lineTo(x, yy);
-      }
+    for (const { pts: poly, rg } of shadowPolys) {
+      withRigid(rg, () => {
+        for (let j = 0; j < poly.length; j++) {
+          const [x, yy] = M(poly[j][0], poly[j][1]);
+          if (j === 0) ctx.moveTo(x, yy);
+          else ctx.lineTo(x, yy);
+        }
+      });
       ctx.closePath();
     }
     ctx.fillStyle = "rgba(18,22,28,0.28)";
@@ -1281,8 +1486,14 @@ export function createAerialScene(seed = 1) {
 
     // 6) 입체 건물·나무 — 먼 것부터 (화가 알고리즘). 건물은 길 바깥으로 기울어 보여 길 위 차는 가리지 않고,
     //    굽은 길 저 앞쪽만 가까운 건물 뒤로 숨는다
-    solids.sort((a, b) => b.d - a.d);
-    for (const s of solids) s.f();
+    if (o.groundClip) ctx.restore();
+    if (o.solidsOut) {
+      o.solidsOut.push(...solids);
+    } else {
+      if (o.extraSolids) solids.push(...o.extraSolids);
+      solids.sort((a, b) => b.d - a.d);
+      for (const s of solids) s.f();
+    }
     ctx.restore();
     return v;
   }
