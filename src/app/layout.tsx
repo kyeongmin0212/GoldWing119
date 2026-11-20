@@ -4,7 +4,7 @@ import "./globals.css";
 // 글꼴은 설치된 시스템 한글 글꼴을 씀 (외부 글꼴 내려받기 없음 — 오프라인 시연 가능)
 
 export const metadata: Metadata = {
-  title: "골든윙 119 — 긴급출동 선행 드론 관제",
+  title: "골든윙 119",
   description: "119 상황실 콘솔과 소방차 태블릿 화면 (해커톤 시연용 시뮬레이션)",
 };
 
