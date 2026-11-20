@@ -46,7 +46,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-navy px-4 py-2 text-white">
         <div className="flex items-baseline gap-2">
           <b className="text-[16px] tracking-tight">골든윙 119</b>
-          <span className="text-[13px] text-white/75">긴급출동 선행 드론 관제</span>
+          <span className="text-[13px] text-white/75">소방차 앞길 정찰 드론 관제</span>
         </div>
         <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
         <div className="ml-auto flex items-center gap-3 text-[12px]">
