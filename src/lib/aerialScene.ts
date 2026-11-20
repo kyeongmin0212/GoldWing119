@@ -110,16 +110,20 @@ export interface AerialView {
 }
 
 export interface CarOpt {
+  /** 길이(세계 단위, 기본 19 ≈ 4.4m) — 23 이상이면 화물차 모양 */
   len?: number;
+  /** 폭(세계 단위, 기본 9) */
   wid?: number;
   police?: boolean;
+  /** 소방차 */
   truck?: boolean;
   blink?: boolean;
-  /** 진행 방향 쪽 원근 압축 (1 = 압축 없음) */
-  sy?: number;
-  /** 번호판 글자 — 가까워서 크게 보이면 앞·뒤에 그린다 */
+  /** 번호판 글자 — 카메라 쪽 앞·뒷면에 크게 보일 때만 글자를 쓴다 */
   plate?: string;
 }
+
+/** 차 유리 색 */
+const CAR_GLASS = "#2a3a4c";
 
 /** 1m = 세계 몇 단위 (차로 폭 15단위 ≈ 3.5m) */
 export const UNITS_PER_M = LANE / 3.5;
@@ -355,13 +359,227 @@ export function createAerialScene(seed = 1) {
     const ct = Math.cos(turn);
     const wyMin = ct > 0.95 ? fwdMin : ct < -0.95 ? backMin : Math.min(fwdMin, backMin);
     const wyMax = ct > 0.95 ? fwdMax : ct < -0.95 ? backMax : Math.max(fwdMax, backMax);
+    /**
+     * 입체 차량: 건물과 같은 투영으로 낮은 상자(차체) + 그 위 작은 상자(유리 객실)를 그린다.
+     * 어느 방향으로 달려도 카메라 쪽 옆면·앞뒤면이 제 방향(화면 아래쪽)에 붙는다. 번호판은 카메라 쪽 앞·뒷면에.
+     * 차 로컬 좌표: x = 오른쪽, y = 뒤쪽(앞은 -y), 단위는 세계 단위.
+     */
     const car: AerialView["car"] = (ctx, u, wy, extra, color, flip = 0, opt = {}) => {
-      const [x0, y0] = M(u, wy);
-      const [x1, y1] = M(u + 2 * Math.sin(extra), wy + 2 * Math.cos(extra));
-      const ang = Math.atan2(x1 - x0, -(y1 - y0));
-      const kk = kAt(u, wy);
-      const sy = Math.max(0.35, Math.min(1, Math.hypot(x1 - x0, y1 - y0) / (2 * kk)));
-      drawCar(ctx, x0, y0, ang, kk, color, flip, { ...opt, sy });
+      const hd = extra + flip;
+      const fu = Math.sin(hd); // 앞 방향 (도로 좌표)
+      const fw = Math.cos(hd);
+      const ru = fw; // 오른쪽 방향
+      const rw = -fu;
+      const L = opt.len ?? 19;
+      const Wd = opt.wid ?? 9;
+      const lorry = !opt.truck && L >= 23;
+      const H = opt.truck ? 11 : lorry ? 10 : 6.2;
+      const road = (x: number, y: number): P => [u + ru * x - fu * y, wy + rw * x - fw * y];
+      const P3 = (x: number, y: number, z: number): P => {
+        const [uu, ww] = road(x, y);
+        return M3(uu, ww, z);
+      };
+      const R3 = (x: number, y: number, z: number): V3 => {
+        const [uu, ww] = road(x, y);
+        return [uu, ww, z];
+      };
+      const poly = (pts: P[]) => {
+        ctx.beginPath();
+        pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.closePath();
+      };
+      /** 평면(높이 z) 위에 차 로컬 단위로 그리기 — 작은 차 하나 크기라 아핀 근사로 충분 */
+      const onPlane = (z: number, draw: () => void) => {
+        const o = P3(0, 0, z);
+        const ex = P3(1, 0, z);
+        const ey = P3(0, 1, z);
+        ctx.save();
+        ctx.transform(ex[0] - o[0], ex[1] - o[1], ey[0] - o[0], ey[1] - o[1], o[0], o[1]);
+        draw();
+        ctx.restore();
+      };
+      /** 앞(-1)·뒤(+1) 끝면 위에 그리기: 가로 = 화면 왼→오른쪽, 세로 = 아래로(-z) */
+      const onEnd = (end: number, draw: () => void) => {
+        const yE = (end * L) / 2;
+        const o = P3(0, yE, 0);
+        const ex = P3(1, yE, 0);
+        const ez = P3(0, yE, 1);
+        const d = ex[0] - o[0] < 0 ? -1 : 1;
+        ctx.save();
+        ctx.transform(d * (ex[0] - o[0]), d * (ex[1] - o[1]), -(ez[0] - o[0]), -(ez[1] - o[1]), o[0], o[1]);
+        draw();
+        ctx.restore();
+      };
+      const light = (nu: number, nw: number) => 0.64 + 0.34 * Math.max(0, nu * SUN_U + nw * SUN_W);
+      type Side = "left" | "right" | "front" | "back";
+      /** 상자 한 칸: 보이는 옆면만 음영 넣어 칠하고, 윗면은 top() 으로 */
+      const block = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, wall: string | ((s: Side, f: number) => string), top: () => void, onSide?: (s: Side) => void) => {
+        const c: V3 = R3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+        const sides: [Side, number, number, number, number, number, number][] = [
+          ["left", x0, y1, x0, y0, -ru, -rw],
+          ["right", x1, y0, x1, y1, ru, rw],
+          ["front", x0, y0, x1, y0, fu, fw],
+          ["back", x1, y1, x0, y1, -fu, -fw],
+        ];
+        for (const [s, ax, ay, bx, by, nu, nw] of sides) {
+          const pts: V3[] = [R3(ax, ay, z0), R3(bx, by, z0), R3(bx, by, z1), R3(ax, ay, z1)];
+          if (!facing(pts, c)) continue;
+          const f = light(nu, nw);
+          poly([P3(ax, ay, z0), P3(bx, by, z0), P3(bx, by, z1), P3(ax, ay, z1)]);
+          ctx.fillStyle = typeof wall === "string" ? shade(wall, f) : wall(s, f);
+          ctx.fill();
+          onSide?.(s);
+        }
+        top();
+      };
+
+      // 그림자 (땅 위)
+      const foot: P[] = [road(-Wd / 2, -L / 2), road(Wd / 2, -L / 2), road(Wd / 2, L / 2), road(-Wd / 2, L / 2)];
+      const sh = hull([...foot, ...foot.map(([a, b]): P => [a + SHADOW_U * H, b + SHADOW_W * H])]);
+      poly(sh.map(([a, b]) => M(a, b)));
+      ctx.fillStyle = "rgba(10,14,20,0.32)";
+      ctx.fill();
+
+      /** 카메라 쪽 끝면의 등·범퍼·번호판 (zb: 차체 높이) */
+      const endDetail = (end: number, zb: number) => {
+        const pw = Wd * 0.5;
+        const ph = Math.min(1.5, zb * 0.36);
+        const pz = zb * 0.42; // 번호판 가운데 높이
+        const ez = P3(0, (end * L) / 2, 1);
+        const eo = P3(0, (end * L) / 2, 0);
+        const pxPerUnit = Math.hypot(ez[0] - eo[0], ez[1] - eo[1]);
+        if (pxPerUnit * zb < 3) return;
+        onEnd(end, () => {
+          ctx.fillStyle = "rgba(20,24,30,0.5)";
+          ctx.fillRect(-Wd / 2, -zb * 0.2, Wd, zb * 0.16);
+          ctx.fillStyle = end > 0 ? "#dc2626" : "#fef3c7";
+          const lw = Wd * 0.2;
+          ctx.fillRect(-Wd / 2 + 0.4, -zb * 0.88, lw, zb * 0.2);
+          ctx.fillRect(Wd / 2 - 0.4 - lw, -zb * 0.88, lw, zb * 0.2);
+          ctx.fillStyle = "#f4f6f8";
+          ctx.fillRect(-pw / 2, -pz - ph / 2, pw, ph);
+          ctx.strokeStyle = "rgba(30,40,55,0.7)";
+          ctx.lineWidth = 0.12;
+          ctx.strokeRect(-pw / 2, -pz - ph / 2, pw, ph);
+          if (opt.plate && ph * pxPerUnit >= 4.5) {
+            // 작은 글꼴은 흐려지므로 10배로 쓰고 줄인다
+            ctx.save();
+            ctx.translate(0, -pz);
+            ctx.scale(0.1, 0.1);
+            ctx.fillStyle = "#111827";
+            ctx.font = `bold ${ph * 8.2}px "Malgun Gothic", sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(maskPlate(opt.plate), 0, ph * 0.4, pw * 9.4);
+            ctx.restore();
+          }
+        });
+      };
+      const glass = (_s: Side, f: number) => shade(CAR_GLASS, 0.75 + 0.35 * f);
+
+      if (opt.truck) {
+        // 소방차: 빨간 상자 + 옆면 흰 띠 + 앞 유리 + 지붕(흰 장비함·사다리·경광등)
+        block(-Wd / 2, Wd / 2, -L / 2, L / 2, 0, H, color, () =>
+          onPlane(H, () => {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(-Wd / 2, -L / 2, Wd, L, 1);
+            ctx.fill();
+            ctx.fillStyle = "#e9e7e2";
+            ctx.fillRect(-Wd / 2 + 1.5, -L / 2 + L * 0.2, Wd - 3, L * 0.7);
+            ctx.fillStyle = "#b8b4ac";
+            for (let i = 0; i < 4; i++) ctx.fillRect(-Wd / 2 + 2.2, -L / 2 + L * (0.26 + i * 0.16), Wd - 4.4, 1);
+            ctx.fillStyle = opt.blink ? "#ef4444" : "#fca5a5";
+            ctx.fillRect(-Wd / 2 + 1, -L / 2 + L * 0.08, Wd / 2 - 1, 2);
+            ctx.fillStyle = opt.blink ? "#fca5a5" : "#ef4444";
+            ctx.fillRect(0, -L / 2 + L * 0.08, Wd / 2 - 1, 2);
+          }), (s) => {
+            if (s === "left" || s === "right") {
+              // 옆면 흰 띠: 옆면 위에 얇은 상자 대신 띠 다각형
+              const x = s === "left" ? -Wd / 2 : Wd / 2;
+              poly([P3(x, -L / 2, 3), P3(x, L / 2, 3), P3(x, L / 2, 4.3), P3(x, -L / 2, 4.3)]);
+              ctx.fillStyle = "rgba(240,238,232,0.9)";
+              ctx.fill();
+              poly([P3(x, -L / 2 + 0.6, 6), P3(x, -L / 2 + L * 0.18, 6), P3(x, -L / 2 + L * 0.18, 9.5), P3(x, -L / 2 + 0.6, 9.5)]);
+              ctx.fillStyle = CAR_GLASS;
+              ctx.fill();
+            } else if (s === "front") {
+              onEnd(-1, () => {
+                ctx.fillStyle = CAR_GLASS;
+                ctx.fillRect(-Wd / 2 + 0.8, -9.6, Wd - 1.6, 3.6);
+              });
+              endDetail(-1, 5.5);
+            } else endDetail(1, 5.5);
+          });
+        return;
+      }
+
+      if (lorry) {
+        // 화물차: 앞 운전석(낮음, 유리) + 뒤 짐칸(높음)
+        const cabEnd = -L / 2 + L * 0.3;
+        block(-Wd / 2, Wd / 2, -L / 2, cabEnd, 0, 7.5, color, () => onPlane(7.5, () => {
+          ctx.fillStyle = shade(color, 0.92);
+          ctx.fillRect(-Wd / 2, -L / 2, Wd, cabEnd + L / 2);
+        }), (s) => {
+          if (s === "front") {
+            onEnd(-1, () => {
+              ctx.fillStyle = CAR_GLASS;
+              ctx.fillRect(-Wd / 2 + 0.7, -6.9, Wd - 1.4, 2.6);
+            });
+            endDetail(-1, 4);
+          } else if (s === "left" || s === "right") {
+            const x = s === "left" ? -Wd / 2 : Wd / 2;
+            poly([P3(x, -L / 2 + 0.8, 4.3), P3(x, cabEnd - 0.8, 4.3), P3(x, cabEnd - 0.8, 6.9), P3(x, -L / 2 + 0.8, 6.9)]);
+            ctx.fillStyle = CAR_GLASS;
+            ctx.fill();
+          }
+        });
+        block(-Wd / 2, Wd / 2, cabEnd + 0.6, L / 2, 0, H, color, () => onPlane(H, () => {
+          ctx.fillStyle = shade(color, 1.05);
+          ctx.fillRect(-Wd / 2, cabEnd + 0.6, Wd, L / 2 - cabEnd - 0.6);
+          ctx.strokeStyle = "rgba(0,0,0,0.18)";
+          ctx.lineWidth = 0.3;
+          ctx.strokeRect(-Wd / 2, cabEnd + 0.6, Wd, L / 2 - cabEnd - 0.6);
+        }), (s) => {
+          if (s === "back") endDetail(1, 4);
+        });
+        return;
+      }
+
+      // 승용차: 아래 차체(본네트·트렁크) + 위 유리 객실 + 지붕
+      const zb = 3.4;
+      const cy0 = -L / 2 + L * 0.3; // 앞 유리 시작
+      const cy1 = -L / 2 + L * 0.8; // 뒤 유리 끝
+      const ci = 0.9; // 객실 좌우 들여쓰기
+      block(-Wd / 2, Wd / 2, -L / 2, L / 2, 0, zb, color, () => onPlane(zb, () => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(-Wd / 2, -L / 2, Wd, L, 2.2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.22)";
+        ctx.lineWidth = 0.35;
+        ctx.stroke();
+      }), (s) => {
+        if (s === "front") endDetail(-1, zb);
+        else if (s === "back") endDetail(1, zb);
+      });
+      block(-Wd / 2 + ci, Wd / 2 - ci, cy0, cy1, zb, H, glass, () => onPlane(H, () => {
+        // 위에서 보이는 앞·뒤 유리 → 그 안쪽 지붕
+        ctx.fillStyle = CAR_GLASS;
+        ctx.fillRect(-Wd / 2 + ci, cy0, Wd - 2 * ci, cy1 - cy0);
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(-Wd / 2 + ci + 0.3, cy0 + 1.2, Wd - 2 * ci - 0.6, cy1 - cy0 - 2, 1.2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        ctx.fillRect(-Wd / 2 + ci + 0.8, cy0 + 2, (Wd - 2 * ci) * 0.35, (cy1 - cy0) * 0.45);
+        if (opt.police) {
+          ctx.fillStyle = opt.blink ? "#ef4444" : "#7f1d1d";
+          ctx.fillRect(-Wd / 2 + ci + 0.4, -0.8, Wd / 2 - ci - 0.4, 1.6);
+          ctx.fillStyle = opt.blink ? "#1e3a8a" : "#3b82f6";
+          ctx.fillRect(0, -0.8, Wd / 2 - ci - 0.4, 1.6);
+        }
+      }));
     };
     return {
       k: kc,
@@ -928,108 +1146,4 @@ export function createAerialScene(seed = 1) {
   }
 
   return { draw, frame, view: makeView, world, setPath };
-}
-
-/** 위에서 본 차량 — 그림자·차체·앞뒤 유리·지붕 반사. (x,y): 그리기 좌표 중심, k: 배율, 0도 = 위쪽을 향함 */
-export function drawCar(ctx: Ctx, x: number, y: number, angle: number, k: number, color: string, flip = 0, opt: CarOpt = {}): void {
-  const L = (opt.len ?? 19) * k;
-  const Wd = (opt.wid ?? 9) * k;
-  const sy = opt.sy ?? 1;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(angle + flip);
-  ctx.scale(1, sy);
-  ctx.fillStyle = "rgba(10,14,20,0.34)";
-  ctx.beginPath();
-  ctx.roundRect(-Wd / 2 + 2.2 * k, -L / 2 + 2.8 * k, Wd, L, 2.5 * k);
-  ctx.fill();
-  if (opt.truck) {
-    // 소방차: 빨간 차체 + 흰 띠 + 경광등
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(-Wd / 2, -L / 2, Wd, L, 2 * k);
-    ctx.fill();
-    ctx.fillStyle = "rgba(25,35,50,0.88)";
-    ctx.fillRect(-Wd / 2 + 1.2 * k, -L / 2 + 1.4 * k, Wd - 2.4 * k, L * 0.09);
-    ctx.fillStyle = "#e9e7e2";
-    ctx.fillRect(-Wd / 2 + 1.5 * k, -L / 2 + L * 0.2, Wd - 3 * k, L * 0.7);
-    ctx.fillStyle = "#b8b4ac";
-    for (let i = 0; i < 4; i++) ctx.fillRect(-Wd / 2 + 2.2 * k, -L / 2 + L * (0.26 + i * 0.16), Wd - 4.4 * k, 1 * k);
-    ctx.fillStyle = opt.blink ? "#ef4444" : "#fca5a5";
-    ctx.fillRect(-Wd / 2 + 1 * k, -L / 2 + L * 0.12, Wd / 2 - 1 * k, 2 * k);
-    ctx.fillStyle = opt.blink ? "#fca5a5" : "#ef4444";
-    ctx.fillRect(0, -L / 2 + L * 0.12, Wd / 2 - 1 * k, 2 * k);
-    ctx.restore();
-    return;
-  }
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.roundRect(-Wd / 2, -L / 2, Wd, L, 3 * k);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.25)";
-  ctx.lineWidth = Math.max(0.6, 0.5 * k);
-  ctx.stroke();
-  ctx.fillStyle = "rgba(25,35,50,0.88)";
-  ctx.beginPath();
-  ctx.roundRect(-Wd / 2 + 1.1 * k, -L / 2 + L * 0.2, Wd - 2.2 * k, L * 0.17, 1.2 * k);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.roundRect(-Wd / 2 + 1.3 * k, L / 2 - L * 0.27, Wd - 2.6 * k, L * 0.11, 1.2 * k);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.16)";
-  ctx.fillRect(-Wd / 2 + 1.5 * k, -L / 2 + L * 0.4, Wd * 0.35, L * 0.3);
-  if (opt.police) {
-    ctx.fillStyle = opt.blink ? "#ef4444" : "#7f1d1d";
-    ctx.fillRect(-Wd / 2 + 1 * k, -L * 0.04, Wd / 2 - 1 * k, 2.4 * k);
-    ctx.fillStyle = opt.blink ? "#1e3a8a" : "#3b82f6";
-    ctx.fillRect(0, -L * 0.04, Wd / 2 - 1 * k, 2.4 * k);
-  }
-  // 카메라 쪽 차체 면(뒤를 보이면 뒷면, 마주 오면 앞면) — 기울인 카메라에서 보이는 만큼만, 그 면 가운데에 번호판
-  const tiltVis = Math.sqrt(Math.max(0, 1 - sy * sy));
-  const faceScreen = 1.45 * UNITS_PER_M * k * tiltVis * 0.9;
-  if (faceScreen > 2) {
-    const ang = angle + flip;
-    const end = Math.cos(ang) >= 0 ? 1 : -1; // 화면 아래쪽(카메라 쪽) 끝
-    const fh = faceScreen / sy;
-    const y0 = end * (L / 2 - 0.6 * k);
-    const y1 = end * (L / 2 + fh);
-    const top = Math.min(y0, y1);
-    const hgt = Math.abs(y1 - y0);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(-Wd / 2, top, Wd, hgt, Math.min(2 * k, hgt / 3));
-    ctx.fill();
-    ctx.fillStyle = "rgba(0,0,0,0.28)";
-    ctx.fill();
-    // 범퍼 쪽 어두운 띠
-    const bumper = end > 0 ? top + hgt * 0.72 : top;
-    ctx.fillStyle = "rgba(20,24,30,0.45)";
-    ctx.fillRect(-Wd / 2, bumper, Wd, hgt * 0.28);
-    // 등: 뒷면이면 빨간 미등, 앞면이면 전조등 (차의 앞은 로컬 -y 쪽)
-    const lampY = end > 0 ? top + hgt * 0.18 : top + hgt * 0.5;
-    ctx.fillStyle = end > 0 ? "#dc2626" : "#fef3c7";
-    ctx.fillRect(-Wd / 2 + 0.5 * k, lampY, Wd * 0.2, hgt * 0.22);
-    ctx.fillRect(Wd / 2 - 0.5 * k - Wd * 0.2, lampY, Wd * 0.2, hgt * 0.22);
-    // 번호판: 실제 위치(면 가운데, 범퍼 위). 영상에서 읽히도록 실물(차폭의 약 30%)보다 조금 크게
-    const pw = Wd * 0.46;
-    const ph = Math.min(hgt * 0.34, pw * 0.27);
-    const pcy = end > 0 ? top + hgt * 0.56 : top + hgt * 0.44;
-    ctx.fillStyle = "#f4f6f8";
-    ctx.fillRect(-pw / 2, pcy - ph / 2, pw, ph);
-    ctx.strokeStyle = "rgba(30,40,55,0.7)";
-    ctx.lineWidth = Math.max(0.5, 0.15 * k);
-    ctx.strokeRect(-pw / 2, pcy - ph / 2, pw, ph);
-    if (opt.plate && ph * sy >= 4.5) {
-      ctx.save();
-      ctx.translate(0, pcy);
-      if (end < 0) ctx.rotate(Math.PI);
-      ctx.fillStyle = "#111827";
-      ctx.font = `bold ${ph * 0.82}px "Malgun Gothic", sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(maskPlate(opt.plate), 0, ph * 0.04, pw * 0.94);
-      ctx.restore();
-    }
-  }
-  ctx.restore();
 }
