@@ -405,16 +405,20 @@ export default function DroneVisionFeed({
               ctx.setLineDash([6, 4]);
               ctx.strokeStyle = "#ff3b3b";
               ctx.lineWidth = 2.5;
-              ctx.strokeRect(px - r, py - r, r * 2, r * 2);
+              // 상자 위쪽이 화면 밖으로 나가면 화면 안에서 자른다 (위에 붙는 이름표 자리 28px 남김)
+              const top = Math.max(28, py - r);
+              ctx.strokeRect(px - r, top, r * 2, Math.max(8, py + r - top));
               ctx.setLineDash([]);
-              label("도로 공사 · 차로 통제", px - r, py - r - 24, "rgba(127,29,29,0.92)");
+              label("도로 공사 · 차로 통제", px - r, top - 24, "rgba(127,29,29,0.92)");
             } else {
               const [px, py] = v.screen(ROAD_HALF - 6, wy);
               const r = boxR(30 * v.kAt(ROAD_HALF - 6, wy));
               ctx.setLineDash([6, 4]);
               ctx.strokeStyle = "#f59e0b";
               ctx.lineWidth = 2.5;
-              ctx.strokeRect(px - r, py - r, r * 2, r * 2);
+              // 상자 위쪽이 화면 밖으로 나가면 화면 안에서 자른다
+              const top = Math.max(4, py - r);
+              ctx.strokeRect(px - r, top, r * 2, Math.max(8, py + r - top));
               ctx.setLineDash([]);
               label(st.blockage.short, px - r, py + r + 4, "rgba(120,53,15,0.92)");
             }
