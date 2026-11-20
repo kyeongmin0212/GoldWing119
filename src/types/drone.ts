@@ -207,9 +207,21 @@ export interface AgentStep {
   delayMs: number;
 }
 
+/** 화면의 IBM 연결 표시: live 실제 응답 확인 · offline 설정은 있으나 호출 실패(시뮬레이션으로 대체) · mock 설정 없음 · unknown 확인 중 */
+export type AgentBackend = "live" | "offline" | "mock" | "unknown";
+
+/** GET /api/agent 응답 — 설정이 있으면 IBM 에 실제로 요청해 본 결과 */
+export interface AgentHealth {
+  mode: "live" | "offline" | "mock";
+  checkedAt: string;
+  reason?: string;
+}
+
 /** /api/agent 응답 */
 export interface AgentResponse {
   mode: "live" | "mock";
+  /** true = 설정은 있으나 IBM 호출이 실패해 MOCK 으로 대체한 응답 */
+  offline?: boolean;
   steps: AgentStep[];
   message: string;
   draft?: ReportDraft;

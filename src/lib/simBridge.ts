@@ -5,7 +5,7 @@
 // - 다른 기기(노트북 ↔ 태블릿): 서버 중계 /api/sync (POST 로 올리고 Server-Sent Events 로 받음)
 
 import { useEffect, useRef, useState } from "react";
-import type { AgentName, RouteChoice, ScenarioMode, SimStatus, ViolationRecord } from "@/types/drone";
+import type { AgentBackend, AgentName, RouteChoice, ScenarioMode, SimStatus, ViolationRecord } from "@/types/drone";
 
 export const SIM_CHANNEL = "gj-wing-sim-v1";
 
@@ -21,7 +21,7 @@ export interface SimSnapshot {
   focusDrone: string | null;
   violations: ViolationRecord[];
   recentLogs: { simTime: number; agent: AgentName; text: string }[];
-  backend: "live" | "mock" | "unknown";
+  backend: AgentBackend;
 }
 
 let channel: BroadcastChannel | null = null;

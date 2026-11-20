@@ -14,6 +14,8 @@ import { buildReportDraft } from "@/lib/report";
 import { buildSimPlan } from "@/lib/simulation";
 import { publishSnapshot, type SimSnapshot } from "@/lib/simBridge";
 import type {
+  AgentBackend,
+  AgentHealth,
   AgentLog,
   AgentName,
   AgentRequest,
@@ -26,6 +28,12 @@ import type {
 } from "@/types/drone";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 에이전트 응답으로 연결 표시 정하기: LIVE 응답 → 연결됨, 설정은 있는데 실패해 대체 → 연결 끊김, 설정 없음 → 시뮬레이션 */
+const backendOf = (res: AgentResponse): AgentBackend => (res.mode === "live" ? "live" : res.offline ? "offline" : "mock");
+
+/** 연결 확인 주기 — 시연 중 인터넷이 끊기거나 키가 만료되면 이 간격 안에 표시가 바뀐다 */
+const HEALTH_INTERVAL_MS = 30_000;
 
 function baseDate(reportedAt: string): Date {
   const [h, m] = reportedAt.split(":").map(Number);
@@ -62,9 +70,11 @@ export function useGoldenTimeSim() {
   violationsRef.current = violations;
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [backend, setBackend] = useState<"live" | "mock" | "unknown">("unknown");
+  const [backend, setBackend] = useState<AgentBackend>("unknown");
+  /** 마지막 연결 확인 시각·실패 사유 (표시 위에 마우스를 올리면 보임) */
+  const [backendInfo, setBackendInfo] = useState<{ checkedAt?: string; reason?: string }>({});
   const [busyAgent, setBusyAgent] = useState<AgentName | null>(null);
-  const backendRef = useRef<"live" | "mock" | "unknown">("unknown");
+  const backendRef = useRef<AgentBackend>("unknown");
   const [focusDrone, setFocusDrone] = useState<string | null>(null);
 
   // 질의 탭 전용 IBM 대화(스레드). 통보 초안은 차량마다 새 대화로 요청해 질의 답에 초안이 섞이지 않게 한다
@@ -97,11 +107,37 @@ export function useGoldenTimeSim() {
     setViolations((vs) => vs.map((v) => (v.id === id ? { ...v, ...patch } : v)));
   }, []);
 
+  /** 에이전트 응답을 받을 때마다 연결 표시도 갱신 */
+  const noteBackend = useCallback((res: AgentResponse) => {
+    setBackend(backendOf(res));
+    setBackendInfo({ checkedAt: new Date().toISOString(), reason: res.offline ? res.fallbackReason : undefined });
+  }, []);
+
+  // 연결 확인: 처음 한 번 + 30초마다 서버가 IBM 에 실제로 요청해 본 결과로 표시
   useEffect(() => {
-    fetch("/api/agent")
-      .then((r) => r.json())
-      .then((d: { mode: "live" | "mock" }) => setBackend(d.mode))
-      .catch(() => setBackend("mock"));
+    let alive = true;
+    const check = () =>
+      fetch("/api/agent", { cache: "no-store" })
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json() as Promise<AgentHealth>;
+        })
+        .then((d) => {
+          if (!alive) return;
+          setBackend(d.mode);
+          setBackendInfo({ checkedAt: d.checkedAt, reason: d.reason });
+        })
+        .catch((e) => {
+          if (!alive) return;
+          setBackend("offline");
+          setBackendInfo({ checkedAt: new Date().toISOString(), reason: `대시보드 서버 응답 없음 (${e instanceof Error ? e.message : e})` });
+        });
+    check();
+    const t = setInterval(check, HEALTH_INTERVAL_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, []);
 
   // 시뮬레이션 루프
@@ -148,7 +184,7 @@ export function useGoldenTimeSim() {
               addLog("watsonx", `[${v.plate}] Orchestrate 감독 에이전트 호출${attempt > 1 ? " (다시 시도)" : ""} — 비전 검증 → 행정 신고 에이전트 순서로 처리 중 (보통 10~25초)`, "progress");
             const res = await callAgent({ type: "violation_detected", violation: { ...v, detectedAtIso: iso } });
             if (gen !== genRef.current) return;
-            setBackend(res.mode);
+            noteBackend(res);
             noteFallback(res);
             if (!(await playSteps(res, gen))) return;
             patchViolation(v.id, { status: "pending", draft: res.draft, agentMessage: res.message, sources: res.sources, fallback: false });
@@ -170,7 +206,7 @@ export function useGoldenTimeSim() {
       draftQueue.current = next.catch(() => {});
       return next;
     },
-    [addLog, playSteps, patchViolation, noteFallback],
+    [addLog, playSteps, patchViolation, noteFallback, noteBackend],
   );
 
   const detect = useCallback(
@@ -420,7 +456,8 @@ export function useGoldenTimeSim() {
         setBusyAgent("watsonx");
         const res = await callAgent({ type: "chat", message, context, threadId: threadRef.current });
         if (gen !== genRef.current) return;
-        setBackend(res.mode);
+        noteBackend(res);
+        noteFallback(res);
         if (res.threadId) threadRef.current = res.threadId;
         setBusyAgent(null);
         addLog("watsonx", res.message, "success", res.sources);
@@ -429,7 +466,7 @@ export function useGoldenTimeSim() {
         addLog("system", `질의 오류: ${e instanceof Error ? e.message : e}`, "warn");
       }
     },
-    [scenario.title, launch, plan.drones, violations, addLog],
+    [scenario.title, launch, plan.drones, violations, addLog, noteBackend, noteFallback],
   );
 
   // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 16 / 출동 2"
@@ -485,6 +522,7 @@ export function useGoldenTimeSim() {
     selectedId,
     setSelectedId,
     backend,
+    backendInfo,
     busyAgent,
     activeDrones,
     focusDrone,

@@ -21,8 +21,16 @@ function useNow() {
   return now;
 }
 
+function backendTitle(backend: SimController["backend"], info: SimController["backendInfo"]): string {
+  const at = info.checkedAt ? ` (마지막 확인 ${new Date(info.checkedAt).toLocaleTimeString("ko-KR", { hour12: false })})` : "";
+  if (backend === "live") return `IBM watsonx Orchestrate 에 실제로 요청해 응답을 확인함${at}`;
+  if (backend === "offline") return `IBM 연결 정보는 있으나 요청 실패 — 내장 시뮬레이션 에이전트로 대체 중${info.reason ? `: ${info.reason}` : ""}${at}`;
+  if (backend === "mock") return "IBM 연결 정보가 없어 내장 시뮬레이션 에이전트 사용";
+  return "IBM 연결 확인 중";
+}
+
 export default function HeaderBar({ sim }: { sim: SimController }) {
-  const { status, mode, backend, activeDrones, simTime, speed, scenario, violations, plan, launch } = sim;
+  const { status, mode, backend, backendInfo, activeDrones, simTime, speed, scenario, violations, plan, launch } = sim;
   const now = useNow();
   const running = status === "running";
   const pending = violations.filter((v) => v.status === "pending" || v.status === "analyzing").length;
@@ -39,8 +47,12 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
         </div>
         <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
         <div className="ml-auto flex items-center gap-3 text-[12px]">
-          <span className="border border-white/50 px-1.5 py-0.5" title={backend === "live" ? "IBM watsonx Orchestrate 실연동" : "내장 시뮬레이션 에이전트"}>
-            watsonx Orchestrate {backend === "live" ? "연결됨" : backend === "mock" ? "시뮬레이션" : "확인 중"}
+          <span
+            className={`border px-1.5 py-0.5 ${backend === "offline" ? "border-amber-300 bg-amber-300/15 font-semibold text-amber-200" : "border-white/50"}`}
+            title={backendTitle(backend, backendInfo)}
+          >
+            watsonx Orchestrate{" "}
+            {backend === "live" ? "연결됨" : backend === "offline" ? "연결 끊김 · 시뮬레이션으로 대체" : backend === "mock" ? "시뮬레이션" : "확인 중"}
           </span>
           <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
           <button

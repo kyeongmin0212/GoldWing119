@@ -4,16 +4,37 @@
 // 관할 매핑·법적 근거·양식은 항상 코드(report.ts)가 결정하고, 에이전트는 문장(설명·초안)만 담당한다.
 
 import { NextResponse } from "next/server";
-import type { AgentRequest, AgentResponse } from "@/types/drone";
+import type { AgentHealth, AgentRequest, AgentResponse } from "@/types/drone";
 import { mockAgent } from "@/lib/mockAgent";
 import { buildReportDraft, checkModelSentences, draftFactSentence } from "@/lib/report";
-import { askAgent, lastJson, mask, wxoConfigured } from "@/lib/wxo";
+import { askAgent, lastJson, mask, pingAgent, wxoConfigured } from "@/lib/wxo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function failReason(e: unknown): string {
+  if (e instanceof Error && e.name === "AbortError") return "응답 시간 초과";
+  const msg = e instanceof Error ? e.message : String(e);
+  if (msg === "fetch failed") return "IBM 서버에 접속할 수 없음 (인터넷 연결·주소 확인)";
+  return mask(msg);
+}
+
+// 연결 확인 결과는 20초 동안 재사용 (여러 화면이 동시에 물어도 IBM 요청은 한 번)
+let health: { at: number; res: AgentHealth } | null = null;
+
+/** 연결 확인 — 설정만 보지 않고 IBM 에 실제로 요청해 본다 */
 export async function GET() {
-  return NextResponse.json({ mode: wxoConfigured() ? "live" : "mock" });
+  if (!wxoConfigured()) return NextResponse.json({ mode: "mock", checkedAt: new Date().toISOString(), reason: "IBM 연결 정보 미설정" } satisfies AgentHealth);
+  if (health && Date.now() - health.at < 20_000) return NextResponse.json(health.res);
+  let res: AgentHealth;
+  try {
+    await pingAgent();
+    res = { mode: "live", checkedAt: new Date().toISOString() };
+  } catch (e) {
+    res = { mode: "offline", checkedAt: new Date().toISOString(), reason: failReason(e) };
+  }
+  health = { at: Date.now(), res };
+  return NextResponse.json(res);
 }
 
 function eventPrompt(req: AgentRequest): string {
@@ -84,6 +105,7 @@ export async function POST(request: Request) {
     const started = Date.now();
     const { text, threadId } = await askAgent(eventPrompt(req), req.threadId);
     const secs = ((Date.now() - started) / 1000).toFixed(1);
+    health = { at: Date.now(), res: { mode: "live", checkedAt: new Date().toISOString() } };
     const json = lastJson(text);
     const { clean, sources } = extractSources(stripJsonLine(text));
 
@@ -113,8 +135,8 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(res);
   } catch (e) {
-    const reason =
-      e instanceof Error && e.name === "AbortError" ? "응답 시간 초과" : mask(e instanceof Error ? e.message : String(e));
-    return NextResponse.json(mockAgent(req, `LIVE 호출 실패 → MOCK 전환: ${reason}`));
+    const reason = failReason(e);
+    health = { at: Date.now(), res: { mode: "offline", checkedAt: new Date().toISOString(), reason } };
+    return NextResponse.json({ ...mockAgent(req, `LIVE 호출 실패 → MOCK 전환: ${reason}`), offline: true } satisfies AgentResponse);
   }
 }

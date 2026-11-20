@@ -64,6 +64,30 @@ async function agentId(base: string, token: string): Promise<string> {
   return hit.id;
 }
 
+/**
+ * 연결 확인: IAM 토큰 + 에이전트 목록을 실제로 요청해 대상 에이전트가 있는지 본다 (대화는 보내지 않음).
+ * 토큰은 캐시돼도 목록 요청은 매번 네트워크로 나가므로 인터넷 끊김·키 만료·에이전트 삭제를 잡는다.
+ */
+export async function pingAgent(timeoutMs = 10_000): Promise<void> {
+  const base = process.env.WXO_ENDPOINT_URL!.trim().replace(/\/+$/, "");
+  const token = await iamToken();
+  const r = await fetchWithTimeout(`${base}/v1/orchestrate/agents`, { headers: { Authorization: `Bearer ${token}` } }, timeoutMs);
+  if (r.status === 401 || r.status === 403) {
+    tokCache = null;
+    throw new Error(`인증 오류(${r.status})`);
+  }
+  if (!r.ok) throw new Error(`에이전트 목록 조회 실패(${r.status})`);
+  const data = (await r.json()) as unknown;
+  const items: { id: string; name: string }[] = Array.isArray(data)
+    ? data
+    : (((data as Record<string, unknown>)?.assistants ?? (data as Record<string, unknown>)?.agents ?? []) as { id: string; name: string }[]);
+  const fixed = process.env.WXO_AGENT_ID?.trim();
+  const name = process.env.WXO_AGENT_NAME?.trim();
+  const hit = items.find((a) => (fixed ? a.id === fixed : a.name === name));
+  if (!hit) throw new Error("대상 에이전트를 찾지 못함");
+  agentIdCache = hit.id;
+}
+
 export async function askAgent(
   text: string,
   threadId?: string,
