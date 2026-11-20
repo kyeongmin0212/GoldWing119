@@ -469,6 +469,11 @@ export function useGoldenTimeSim() {
           `시나리오: ${scenario.title}`,
           // 막힘 원인을 함께 보내야 "시나리오 1 막힘 원인" 같은 질문에 문서 검색 없이도 맞게 답한다
           ...(scenario.blockage ? [`이 시나리오에서 드론이 발견하는 전방 막힘 원인(시연 설정): ${scenario.blockage.label}`] : []),
+          `출동 소방서: ${scenario.station.name}`,
+          // 막힘을 발견한 뒤에는 화면의 도착 시간 비교도 함께 — "우회하면 몇 분 단축?" 질문용
+          ...(launch && plan.blockage && simTimeRef.current >= plan.blockage.atSec
+            ? [`전방 막힘 도착 시간 비교: 기존 경로 유지 T+${formatClock(plan.blockage.stayArrivalSec)} / 우회 T+${formatClock(plan.blockage.detourArrivalSec)} → ${formatClock(plan.blockage.savedSec)} 단축 (${plan.blockage.summary})`]
+            : []),
           `경과: T+${formatClock(simTimeRef.current)}`,
           `드론 투입: ${launch ? plan.drones.map((d) => d.assignment.droneId).join(", ") : "없음"}`,
           `탐지 차량: ${violationsRef.current.length}대 (검증·통보 초안은 대시보드가 따로 처리 중)`,
@@ -491,7 +496,7 @@ export function useGoldenTimeSim() {
       chatQueue.current = next.catch(() => {});
       return next;
     },
-    [scenario.title, launch, plan.drones, addLog, noteBackend, noteFallback],
+    [scenario.title, scenario.blockage, scenario.station.name, launch, plan.drones, plan.blockage, addLog, noteBackend, noteFallback],
   );
 
   // 승인으로 배정된 드론 수 (이륙 예약 포함) — 헤더 "대기 16 / 출동 2"
