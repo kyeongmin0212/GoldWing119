@@ -17,6 +17,10 @@ import type { SimView } from "@/lib/simView";
 import type { LatLng, ViolationRecord, ViolationSample } from "@/types/drone";
 
 type Phase = "standby" | "nodrone" | "prep" | "transit" | "scan";
+/** 갈림길 정보: 그 경로 선에서 갈림길까지 거리(m), 갈림길부터 앞으로(최대 FORK_LEN_M) 진행 방향 표 */
+type ForkLine = { junction: number; branch: number[] };
+/** 갈림길 도로를 미리 그려 둘 길이(m) */
+const FORK_LEN_M = 300;
 
 interface FrameState {
   phase: Phase;
@@ -29,6 +33,10 @@ interface FrameState {
   basePts: LatLng[] | null;
   baseCum: number[] | null;
   junctionAlong: number | null;
+  /** 지금 경로 선(roadPts)이 기존 경로인가 (우회 승인 전) */
+  onBaseLine: boolean;
+  /** 우회로가 있는 시나리오: 기존·우회 경로 각각의 갈림길 위치(m)와 갈림길부터의 진행 방향 표 — 서로의 갈림길 도로로 미리 그린다 */
+  fork: { base: ForkLine; det: ForkLine } | null;
   /** 도로 선 누적 거리(m) */
   cum: number[];
   truck: TruckTimeline;
@@ -169,6 +177,24 @@ export default function DroneVisionFeed({
     for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + meters(pts[i - 1], pts[i]));
     return { pts, cum, junction: cum[b.idx[det.fromSeg]] };
   }, [plan.route.variant, sim.scenario]);
+  // 우회로 갈림길: 기존 경로를 갈 때는 우회로가, 우회로를 갈 때는 막힌 기존 길이 옆으로 갈라지는 도로로 보이게
+  const forkData = useMemo(() => {
+    const det = sim.scenario.blockage?.detour;
+    if (!det) return null;
+    const dr = scenarioRoute(sim.scenario, "detour");
+    if (dr.variant !== "detour") return null;
+    const mk = (r: ScenarioRoad): ForkLine => {
+      const pts = r.line.map(([lat, lng]) => ({ lat, lng }));
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + meters(pts[i - 1], pts[i]));
+      const j0 = r.idx[det.fromSeg];
+      const junction = cum[j0];
+      let j1 = j0;
+      while (j1 < pts.length - 1 && cum[j1] - junction < FORK_LEN_M) j1++;
+      return { junction, branch: headingTable(pts.slice(j0, j1 + 1), cum.slice(j0, j1 + 1).map((c) => c - junction)) };
+    };
+    return { base: mk(scenarioRoute(sim.scenario, "base").road), det: mk(dr.road) };
+  }, [sim.scenario]);
   const myIds = new Set(myDet.map((d) => d.violationId));
 
   stateRef.current = {
@@ -181,6 +207,8 @@ export default function DroneVisionFeed({
     basePts: baseData?.pts ?? null,
     baseCum: baseData?.cum ?? null,
     junctionAlong: baseData?.junction ?? null,
+    onBaseLine: plan.route.variant !== "detour",
+    fork: forkData,
     cum: roadData.cum,
     truck: plan.truck,
     truckOn: status !== "idle" && status !== "awaiting",
@@ -284,14 +312,25 @@ export default function DroneVisionFeed({
       }
       // 우회 승인 뒤 드론이 갈림길까지 왔던 길로 되돌아가는 동안은 기존 경로 선을 쓰고(뒤돌아 비행), 갈림길에 닿으면 우회로 선으로
       let R = { pts: st.roadPts, cum: st.cum };
+      let onBase = st.onBaseLine;
       if (st.basePts && st.baseCum && st.junctionAlong !== null && st.drone && (st.phase === "scan" || st.phase === "transit")) {
         const b = alongRoad(droneAt(st.drone, st.simTime), st.basePts, st.baseCum);
-        if (b.dist < 25 && b.along > st.junctionAlong + 3) R = { pts: st.basePts, cum: st.baseCum };
+        if (b.dist < 25 && b.along > st.junctionAlong + 3) {
+          R = { pts: st.basePts, cum: st.baseCum };
+          onBase = true;
+        }
       }
       // 영상 속 길을 지금 쓰는 경로 선 방향대로 — 선이 바뀔 때만 다시 계산
       if (pathOf !== R.cum) {
         pathOf = R.cum;
         scene.setPath({ wy0: 2000, step: PATH_STEP_M * UPM, theta: headingTable(R.pts, R.cum) });
+        // 갈림길 도로: 지금 길의 갈림길 지점에서 다른 쪽 경로(우회로 또는 막힌 기존 길)를 미리 그려 둔다
+        const fk = st.fork;
+        if (fk) {
+          const main = onBase ? fk.base : fk.det;
+          const other = onBase ? fk.det : fk.base;
+          scene.setBranches([{ atWy: 2000 + main.junction * UPM, step: PATH_STEP_M * UPM, theta: other.branch }]);
+        }
       }
 
       // 드론 위치 → 가상 장면 위치: 순항·정찰 모두 소방차 경로를 따라 실제로 간 거리로 (속도가 갑자기 바뀌지 않게)

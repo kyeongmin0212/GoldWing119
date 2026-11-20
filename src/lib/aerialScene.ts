@@ -96,6 +96,13 @@ export interface AerialView {
   kAt3: (u: number, wy: number, z: number) => number;
   /** 도로 좌표 → (옆 l, 드론 바로 아래에서 앞으로 f) */
   ground: (u: number, wy: number) => P;
+  /** 세계 좌표 → (옆 l, 앞 f) */
+  groundW: (wx: number, wy: number) => P;
+  /** 세계 좌표 → 화면 픽셀 (갈림길 도로) */
+  Mw: (wx: number, wy: number) => P;
+  /** 화면에 들어오는 앞 거리 f 범위 (여유 포함) */
+  fNear: number;
+  fFar: number;
   /** 면(pts)이 카메라 쪽을 보는가 — c: 그 입체의 가운데 */
   facing: (pts: V3[], c: V3) => boolean;
   /** 화면에 보이는 도로 방향 범위 */
@@ -183,6 +190,13 @@ export interface RoadPath {
   theta: number[];
 }
 
+/** 큰길 atWy 지점에서 갈라지는 도로 — step 간격마다 진행 방향(RoadPath 와 같은 기준) */
+export interface RoadBranch {
+  atWy: number;
+  step: number;
+  theta: number[];
+}
+
 export function createAerialScene(seed = 1) {
   // 경로가 없을 때(대기 화면 등)의 기본 길: 완만하게 굽은 길
   const roadX = (wy: number) => 150 * Math.sin(wy / 330 + seed) + 55 * Math.sin(wy / 140 + seed * 2.1);
@@ -204,7 +218,52 @@ export function createAerialScene(seed = 1) {
       py.push(py[i - 1] + p.step * Math.cos(a));
     }
     path = { wy0: p.wy0, step: p.step, th, px, py };
+    branches = [];
   }
+
+  /**
+   * 갈림길 도로 — 지금 따라가는 길(큰길)에서 갈라지는 실제 우회로(또는 우회 뒤엔 막힌 기존 길)를 미리 그려 둔다.
+   * 그래야 우회를 승인하고 드론이 갈림길로 돌아갔을 때 들어갈 길이 이미 화면에 있다.
+   * 큰길 wy 지점에서 시작해 진행 방향 표(theta)대로 이어 붙인다. setPath 다음에 불러야 한다(큰길이 바뀌면 다시).
+   */
+  let branches: { x: number[]; y: number[]; a: number[]; hits: { u: number; wy: number }[] }[] = [];
+  function setBranches(list: RoadBranch[]) {
+    branches = [];
+    if (!path) return;
+    for (const b of list) {
+      if (b.theta.length < 2) continue;
+      const [x0, y0] = center(b.atWy);
+      const x = [x0];
+      const y = [y0];
+      for (let i = 1; i < b.theta.length; i++) {
+        const a = (b.theta[i - 1] + b.theta[i]) / 2;
+        x.push(x[i - 1] + b.step * Math.sin(a));
+        y.push(y[i - 1] + b.step * Math.cos(a));
+      }
+      // 큰길 도로 좌표(u, wy)로 본 갈림길 중심선 — 이 자리에 건물·주차 차량을 두지 않는다
+      const hits: { u: number; wy: number }[] = [];
+      let guess = b.atWy;
+      for (let i = 0; i < x.length; i++) {
+        let best = { d: Infinity, wy: guess, u: 0 };
+        for (let wy = guess - 260; wy <= guess + 260; wy += 3) {
+          const [cxx, cyy, a] = center(wy);
+          const d = Math.hypot(x[i] - cxx, y[i] - cyy);
+          if (d < best.d) best = { d, wy, u: (x[i] - cxx) * Math.cos(a) - (y[i] - cyy) * Math.sin(a) };
+        }
+        guess = best.wy;
+        if (Math.abs(best.u) > 260) break; // 길가 건물 줄보다 멀리 나가면 더 볼 필요 없음
+        hits.push({ u: best.u, wy: best.wy });
+      }
+      branches.push({ x, y, a: b.theta, hits });
+    }
+  }
+  /** 큰길 side 쪽 u0~u1, wy y0~y1 칸에 갈림길 도로가 지나가는가 (도로 폭만큼 여유) */
+  const onBranch = (side: number, u0: number, u1: number, y0: number, y1: number): boolean => {
+    const m = ROAD_HALF + SIDEWALK + 6;
+    for (const b of branches)
+      for (const p of b.hits) if (p.u * side > 0 && Math.abs(p.u) > ROAD_HALF * 0.5 /* 큰길과 겹친 곳은 빼고 */ && Math.abs(p.u) > u0 - m && Math.abs(p.u) < u1 + m && p.wy > y0 - m && p.wy < y1 + m) return true;
+    return false;
+  };
 
   /** 그 지점의 중심선 (x, y), 진행 방향, 굽은 정도(라디안/단위) */
   const center = (wy: number): [number, number, number, number] => {
@@ -298,6 +357,10 @@ export function createAerialScene(seed = 1) {
     /** 도로 좌표 → (옆 l, 바로 아래 지점에서 앞으로 f) */
     const ground = (u: number, wy: number): P => {
       const [wx, wyy] = world(u, wy);
+      return groundW(wx, wyy);
+    };
+    /** 세계 좌표 → (옆 l, 앞 f) — 갈림길 도로처럼 큰길 도로 좌표로 나타낼 수 없는 것 */
+    const groundW = (wx: number, wyy: number): P => {
       const x = wx - camX;
       const y = -(wyy - camY);
       const l = x * c - y * sn;
@@ -310,7 +373,12 @@ export function createAerialScene(seed = 1) {
       const zc = zcOf(f);
       return [cx + (F * l) / zc, cy + (F * (h * cosT - f * sinT)) / zc];
     };
-    const kAt = (u: number, wy: number) => F / zcOf(ground(u, wy)[1]);
+    const Mw = (wx: number, wyy: number): P => {
+      const [l, f] = groundW(wx, wyy);
+      const zc = zcOf(f);
+      return [cx + (F * l) / zc, cy + (F * (h * cosT - f * sinT)) / zc];
+    };
+    const kAt =(u: number, wy: number) => F / zcOf(ground(u, wy)[1]);
     // 높이 z 인 점: 카메라 높이를 h - z 로 보고 같은 식으로 투영.
     // 화면 아래 끝 너머(카메라 바로 근처)의 높은 점은 카메라 뒤로 넘어가지 않게 높이를 눌러 둔다 (그곳은 화면 밖)
     const zEff = (f: number, z: number) => Math.min(z, Math.max(0, h * 0.75 + (f * cosT) / sinT));
@@ -595,6 +663,10 @@ export function createAerialScene(seed = 1) {
       M3,
       kAt3,
       ground,
+      groundW,
+      Mw,
+      fNear: fBot - 80,
+      fFar: Math.min(fTop, h * 12) + 80,
       facing,
       wyMin,
       wyMax,
@@ -881,12 +953,15 @@ export function createAerialScene(seed = 1) {
           y += len;
           n++;
           if (inAlley(side, y0, y1, alleys)) continue;
+          // 갈림길 도로가 지나가는 칸은 비워 둔다 (앞줄·뒷줄 따로)
+          const frontHit = onBranch(side, ROAD_HALF + SIDEWALK, ROAD_HALF + SIDEWALK + 72, y0, y1);
+          const backHit = onBranch(side, ROAD_HALF + SIDEWALK + 72, BACK_U + 50, y0, y1);
           // 교차로에서 도는 곳은 건물 대신 모퉁이 공원(잔디·나무) — 길을 따라 놓은 건물은 바깥쪽이 부채꼴로 늘어나고
           // 안쪽은 접혀 보이지만, 평평한 잔디와 둥근 나무는 꺾여도 어색하지 않다
           if (bendAt(y0 - 20, y1 + 20) * BACK_U > 0.35) {
             fillQuad(side * (ROAD_HALF + SIDEWALK), side * (BACK_U + 220), y0 - 2, y1 + 2, "#9caf7a");
             const kap = center((y0 + y1) / 2)[3];
-            for (let q = 0; q < 4; q++) {
+            for (let q = 0; q < 4 && !frontHit && !backHit; q++) {
               const tu = side * (ROAD_HALF + SIDEWALK + 12 + q * 38 + hash(id, 140 + q, seed) * 14);
               if (tu * kap > 0.6) continue; // 안쪽 모퉁이 깊은 곳은 눌려 있어 나무가 겹친다
               tree3(tu, y0 + (y1 - y0) * (0.2 + 0.6 * hash(id, 150 + q, seed)), 6 + hash(id, 160 + q, seed) * 4);
@@ -896,7 +971,9 @@ export function createAerialScene(seed = 1) {
           const r = hash(id, 40, seed);
           const uIn = side * (ROAD_HALF + SIDEWALK);
           const ym = (y0 + y1) / 2;
-          if (frontKind === "shop") {
+          if (frontHit) {
+            // 갈림길 도로 자리 — 건물 없음
+          } else if (frontKind === "shop") {
             // 상가: 1~3층 평지붕, 1층 유리창 + 간판 띠, 위층 창문, 옥상 실외기
             const depth = 34 + r * 26;
             const uOut = uIn + side * depth;
@@ -979,7 +1056,9 @@ export function createAerialScene(seed = 1) {
           const backIn = side * (ROAD_HALF + SIDEWALK + 72);
           const backKind = hash(id, 80, seed);
           const bOut = backIn + side * (48 + hash(id, 81, seed) * 30);
-          if (backKind < 0.45) {
+          if (backHit) {
+            // 갈림길 도로 자리 — 건물 없음
+          } else if (backKind < 0.45) {
             const roof = HOUSE_ROOF[Math.floor(hash(id, 82, seed) * HOUSE_ROOF.length)];
             const wall = HOUSE_WALL[Math.floor(hash(id, 84, seed) * HOUSE_WALL.length)];
             const hIn = backIn + side * 6;
@@ -1051,6 +1130,65 @@ export function createAerialScene(seed = 1) {
       }
     }
 
+    // 2.5) 갈림길 도로(우회로·막힌 기존 길) — 큰길보다 먼저 칠해 겹치는 입구는 큰길이 덮는다
+    for (const b of branches) {
+      const n = b.x.length;
+      const vis = b.x.map((x, i) => {
+        const f = v.groundW(x, b.y[i])[1];
+        return f > v.fNear && f < v.fFar;
+      });
+      const off = (i: number, u: number): P => v.Mw(b.x[i] + u * Math.cos(b.a[i]), b.y[i] - u * Math.sin(b.a[i]));
+      /** 화면에 들어오는 연속 구간마다 */
+      const runs = (f: (i0: number, i1: number) => void) => {
+        let i = 0;
+        while (i < n) {
+          if (!vis[i]) {
+            i++;
+            continue;
+          }
+          let j = i;
+          while (j + 1 < n && vis[j + 1]) j++;
+          if (j > i) f(i, j);
+          i = j + 1;
+        }
+      };
+      const brStrip = (half: number, fill: string | CanvasPattern) =>
+        runs((i0, i1) => {
+          ctx.beginPath();
+          for (let i = i0; i <= i1; i++) {
+            const [x, yy] = off(i, -half);
+            if (i === i0) ctx.moveTo(x, yy);
+            else ctx.lineTo(x, yy);
+          }
+          for (let i = i1; i >= i0; i--) {
+            const [x, yy] = off(i, half);
+            ctx.lineTo(x, yy);
+          }
+          ctx.closePath();
+          ctx.fillStyle = fill;
+          ctx.fill();
+        });
+      const brLine = (u: number, color: string, w: number) =>
+        runs((i0, i1) => {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(1, w * k);
+          ctx.beginPath();
+          for (let i = i0; i <= i1; i++) {
+            const [x, yy] = off(i, u);
+            if (i === i0) ctx.moveTo(x, yy);
+            else ctx.lineTo(x, yy);
+          }
+          ctx.stroke();
+        });
+      brStrip(ROAD_HALF + SIDEWALK, "#d9d5ca");
+      brStrip(ROAD_HALF + 1.5, "#ecebe6");
+      brStrip(ROAD_HALF, pat);
+      brLine(-1.3, "#f2c230", 0.9);
+      brLine(1.3, "#f2c230", 0.9);
+      brLine(-ROAD_HALF + 1.4, "rgba(255,255,255,0.85)", 0.7);
+      brLine(ROAD_HALF - 1.4, "rgba(255,255,255,0.85)", 0.7);
+    }
+
     // 3) 큰길: 경계석(보도) → 아스팔트 → 차선
     const strip = (half: number, fill: string | CanvasPattern) => {
       ctx.beginPath();
@@ -1118,6 +1256,7 @@ export function createAerialScene(seed = 1) {
           if (hash(i * 7 + j, side + 95, seed) > 0.3) continue;
           const wy = i * BLOCK + 14 + j * 32;
           if (inAlley(side, wy - 12, wy + 12, alleys)) continue;
+          if (onBranch(side, ROAD_HALF - 10, ROAD_HALF, wy - 12, wy + 12)) continue; // 갈림길 입구
           if (side > 0 && o.keepClearWy?.some((c) => Math.abs(c - wy) < 26)) continue;
           v.car(ctx, side * (ROAD_HALF - 4.6), wy, 0, CAR[Math.floor(hash(i * 7 + j, 96, seed) * CAR.length)], side < 0 ? Math.PI : 0, { plate: fakePlate(i * 14 + j * 2 + (side > 0 ? 1 : 0) + seed * 1000) });
         }
@@ -1148,5 +1287,5 @@ export function createAerialScene(seed = 1) {
     return v;
   }
 
-  return { draw, frame, view: makeView, world, setPath };
+  return { draw, frame, view: makeView, world, setPath, setBranches };
 }
