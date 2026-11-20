@@ -48,7 +48,7 @@ export default function HeaderBar({ sim }: { sim: SimController }) {
           <b className="text-[16px] tracking-tight">골든윙 119</b>
           <span className="text-[13px] text-white/75">소방차 앞길 정찰 드론 관제</span>
         </div>
-        <span className="text-[12px] text-white/70">119 종합상황실 · 1번 콘솔 (관제요원·원격 조종자)</span>
+        <span className="text-[12px] text-white/70">119 종합상황실 · 관제요원·원격 조종자 화면</span>
         <div className="ml-auto flex items-center gap-3 text-[12px]">
           <span className="font-mono text-white/85">{now ? now.toLocaleString("ko-KR", { hour12: false }) : ""}</span>
           <span
