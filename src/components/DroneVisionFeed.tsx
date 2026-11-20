@@ -68,6 +68,52 @@ function alongRoad(p: LatLng, pts: LatLng[], cum: number[]): { along: number; di
   return best;
 }
 
+/** 영상 속 길 방향 표: 도로 선을 따라 2m 마다 진행 방향(위쪽 0, 오른쪽 +).
+ *  지도 선의 잔 꺾임은 앞뒤 40m 평균으로 펴서, 교차로 좌회전·우회전은 부드럽게 도는 길로 보이게 한다. */
+const PATH_STEP_M = 2;
+const PATH_SMOOTH_M = 40;
+function headingTable(pts: LatLng[], cum: number[]): number[] {
+  const total = cum[cum.length - 1] || 0;
+  if (pts.length < 2 || total <= 0) return [];
+  const lat0 = pts[0].lat;
+  const kx = (Math.PI * R_EARTH * Math.cos((lat0 * Math.PI) / 180)) / 180;
+  const ky = (Math.PI * R_EARTH) / 180;
+  const xy = pts.map((p) => [(p.lng - pts[0].lng) * kx, (p.lat - lat0) * ky]);
+  let seg = 1;
+  const pos = (a: number): number[] => {
+    const d = Math.max(0, Math.min(total, a));
+    seg = Math.max(1, Math.min(seg, cum.length - 1));
+    while (seg > 1 && cum[seg - 1] > d) seg--;
+    while (seg < cum.length - 1 && cum[seg] < d) seg++;
+    const len = cum[seg] - cum[seg - 1] || 1;
+    const t = (d - cum[seg - 1]) / len;
+    return [xy[seg - 1][0] + (xy[seg][0] - xy[seg - 1][0]) * t, xy[seg - 1][1] + (xy[seg][1] - xy[seg - 1][1]) * t];
+  };
+  const n = Math.ceil(total / PATH_STEP_M) + 1;
+  const raw: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * PATH_STEP_M;
+    const p0 = pos(a - 6);
+    const p1 = pos(a + 6);
+    let th = Math.atan2(p1[0] - p0[0], p1[1] - p0[1]);
+    if (i > 0) {
+      // 이어지게 펼치기 (359° → 1° 를 +2° 로)
+      const prev = raw[i - 1];
+      while (th - prev > Math.PI) th -= 2 * Math.PI;
+      while (th - prev < -Math.PI) th += 2 * Math.PI;
+    }
+    raw.push(th);
+  }
+  const w = Math.round(PATH_SMOOTH_M / PATH_STEP_M);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (let j = i - w; j <= i + w; j++) sum += raw[Math.max(0, Math.min(n - 1, j))];
+    out.push(sum / (2 * w + 1));
+  }
+  return out;
+}
+
 export default function DroneVisionFeed({
   sim,
   big = false,
@@ -139,6 +185,7 @@ export default function DroneVisionFeed({
     let zoom = 1;
     let scene = createAerialScene(3);
     let sceneSeed = 3;
+    let pathOf: number[] | null = null;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
 
     const resize = () => {
@@ -214,6 +261,12 @@ export default function DroneVisionFeed({
       if (st.seed !== sceneSeed) {
         sceneSeed = st.seed;
         scene = createAerialScene(sceneSeed);
+        pathOf = null;
+      }
+      // 영상 속 길을 지금 경로(우회 승인 뒤엔 우회로) 방향대로 — 경로가 바뀔 때만 다시 계산
+      if (pathOf !== st.cum) {
+        pathOf = st.cum;
+        scene.setPath({ wy0: 2000, step: PATH_STEP_M * UPM, theta: headingTable(st.roadPts, st.cum) });
       }
 
       // 드론 위치 → 가상 장면 위치: 순항·정찰 모두 소방차 경로를 따라 실제로 간 거리로 (속도가 갑자기 바뀌지 않게)

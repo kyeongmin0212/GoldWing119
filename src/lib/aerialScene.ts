@@ -163,15 +163,70 @@ const GLASS = "#33465a";
 const WINDOW = "#3e5266";
 const CAR = ["#f2f2f0", "#c7cbd0", "#2b2d31", "#7b8088", "#b3262b", "#2f4f8a", "#d8d2c4", "#f2f2f0", "#c7cbd0", "#e9e9e6"];
 
+/**
+ * 실제 지도 경로의 진행 방향 표 — 영상 속 길이 지도대로 좌회전·우회전하게 한다.
+ * wy0 부터 step 간격마다 진행 방향(라디안, 위쪽 0, 오른쪽으로 꺾이면 +, 이어지게 펼친 값).
+ */
+export interface RoadPath {
+  wy0: number;
+  step: number;
+  theta: number[];
+}
+
 export function createAerialScene(seed = 1) {
+  // 경로가 없을 때(대기 화면 등)의 기본 길: 완만하게 굽은 길
   const roadX = (wy: number) => 150 * Math.sin(wy / 330 + seed) + 55 * Math.sin(wy / 140 + seed * 2.1);
   const roadDx = (wy: number) => (150 / 330) * Math.cos(wy / 330 + seed) + (55 / 140) * Math.cos(wy / 140 + seed * 2.1);
-  const frame = (wy: number): RoadFrame => ({ cx: roadX(wy), angle: Math.atan(roadDx(wy)) });
-  /** 도로 좌표 → 세계 좌표 (중심선에서 법선 방향으로 u 만큼) */
+
+  // 지도 경로가 있으면: 진행 방향을 따라 중심선을 이어 붙인 길 (wy = 길을 따라 간 거리)
+  let path: { wy0: number; step: number; th: number[]; px: number[]; py: number[] } | null = null;
+  function setPath(p: RoadPath | null) {
+    if (!p || p.theta.length < 2) {
+      path = null;
+      return;
+    }
+    const th = p.theta;
+    const px = [0];
+    const py = [p.wy0];
+    for (let i = 1; i < th.length; i++) {
+      const a = (th[i - 1] + th[i]) / 2;
+      px.push(px[i - 1] + p.step * Math.sin(a));
+      py.push(py[i - 1] + p.step * Math.cos(a));
+    }
+    path = { wy0: p.wy0, step: p.step, th, px, py };
+  }
+
+  /** 그 지점의 중심선 (x, y), 진행 방향, 굽은 정도(라디안/단위) */
+  const center = (wy: number): [number, number, number, number] => {
+    if (!path) return [roadX(wy), wy, Math.atan(roadDx(wy)), 0];
+    const { wy0, step, th, px, py } = path;
+    const n = th.length - 1;
+    const f = (wy - wy0) / step;
+    if (f <= 0) return [px[0] + (wy - wy0) * Math.sin(th[0]), py[0] + (wy - wy0) * Math.cos(th[0]), th[0], 0];
+    if (f >= n) {
+      const d = wy - (wy0 + n * step);
+      return [px[n] + d * Math.sin(th[n]), py[n] + d * Math.cos(th[n]), th[n], 0];
+    }
+    const i = Math.floor(f);
+    const t = f - i;
+    const a0 = th[i];
+    const a1 = th[i + 1];
+    const kap = (a1 - a0) / step;
+    // 구간 안에서는 방향이 고르게 바뀐다고 보고 위치를 적분
+    const am = a0 + (a1 - a0) * t * 0.5;
+    const d = t * step;
+    return [px[i] + d * Math.sin(am), py[i] + d * Math.cos(am), a0 + (a1 - a0) * t, kap];
+  };
+  const frame = (wy: number): RoadFrame => {
+    const [cx, , angle] = center(wy);
+    return { cx, angle };
+  };
+  /** 도로 좌표 → 세계 좌표 (중심선에서 오른쪽 법선 방향으로 u 만큼) */
   const world = (u: number, wy: number): P => {
-    const dx = roadDx(wy);
-    const n = Math.sqrt(1 + dx * dx);
-    return [roadX(wy) + u / n, wy - (u * dx) / n];
+    const [x, y, a, kap] = center(wy);
+    // 급하게 꺾이는 곳 안쪽은 굽은 반지름보다 멀리 두면 접혀 보이므로 반지름 안쪽으로 눌러 둔다
+    if (u * kap > 0.85) u = 0.85 / kap;
+    return [x + u * Math.cos(a), y - u * Math.sin(a)];
   };
 
   let asphalt: CanvasPattern | null = null;
@@ -212,15 +267,16 @@ export function createAerialScene(seed = 1) {
     const lookAhead = h / Math.tan(theta); // 바로 아래 지점에서 화면 가운데 지점까지
     const cx = W / 2;
     const cy = H * 0.66; // 화면 가운데보다 조금 아래 — 앞쪽을 더 넓게 본다
-    const camX = roadX(s + 25);
-    const camAngle = 0.75 * Math.atan(roadDx(s + 30)) + 0.25 * Math.atan(roadDx(s + 90));
+    // 화면 가운데 지점과 카메라 방향 — 카메라는 조금 앞쪽 길 방향을 보며 돌아간다 (꺾이는 곳에서 미리 돈다)
+    const [camX, camY] = path ? center(s) : [roadX(s + 25), s];
+    const camAngle = 0.75 * center(s + 30)[2] + 0.25 * center(s + 90)[2];
     const c = Math.cos(-camAngle);
     const sn = Math.sin(-camAngle);
     /** 도로 좌표 → (옆 l, 바로 아래 지점에서 앞으로 f) */
     const ground = (u: number, wy: number): P => {
       const [wx, wyy] = world(u, wy);
       const x = wx - camX;
-      const y = -(wyy - s);
+      const y = -(wyy - camY);
       const l = x * c - y * sn;
       const yd = x * sn + y * c;
       return [l, -yd + lookAhead];
@@ -836,7 +892,7 @@ export function createAerialScene(seed = 1) {
     return v;
   }
 
-  return { draw, frame, view: makeView, world };
+  return { draw, frame, view: makeView, world, setPath };
 }
 
 /** 위에서 본 차량 — 그림자·차체·앞뒤 유리·지붕 반사. (x,y): 그리기 좌표 중심, k: 배율, 0도 = 위쪽을 향함 */
