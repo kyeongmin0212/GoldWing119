@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #070b12;
+  --color-ink-900: #0b111b;
+  --color-ink-850: #0f1724;
+  --color-ink-800: #141e2e;
+  --color-ink-700: #1d2a3e;
+  --color-ink-600: #2a3a52;
+  --color-ink-400: #6b7d96;
+  --color-ink-300: #93a3b8;
+  --color-ink-100: #dbe4ef;
+  --color-alert: #ff3b3b;
+  --color-drone: #22d3ee;
+  --color-truck: #fb923c;
+  --color-ok: #34d399;
+  --color-ibm: #4589ff;
+  --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel {
+  background: var(--color-ink-900);
+  border: 1px solid var(--color-ink-700);
+  border-radius: 10px;
+}
+
+.panel-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-300);
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-ink-600);
+  border-radius: 3px;
+}
+
+@keyframes pulse-ring {
+  0% { r: 6; opacity: 0.9; }
+  100% { r: 22; opacity: 0; }
+}
+.pulse-ring {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+
+@keyframes dash {
+  to { stroke-dashoffset: -24; }
+}
+.flow-dash {
+  stroke-dasharray: 8 4;
+  animation: dash 0.8s linear infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0.35; }
+}
+.blink {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes slide-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.slide-in {
+  animation: slide-in 0.25s ease-out;
+}

@@ -1,0 +1,116 @@
+// 대시보드 ↔ IBM watsonx Orchestrate 이벤트 브리지
+// - LIVE: .env.local 에 WXO_* 가 있으면 Orchestrate 수퍼바이저 에이전트를 호출
+// - MOCK: 미설정·오류·타임아웃이면 내장 시뮬레이션 에이전트로 자동 전환 (같은 응답 스키마)
+// 관할 매핑·법적 근거·양식은 항상 코드(report.ts)가 결정하고, 에이전트는 문장(설명·초안)만 담당한다.
+
+import { NextResponse } from "next/server";
+import type { AgentRequest, AgentResponse } from "@/types/drone";
+import { mockAgent } from "@/lib/mockAgent";
+import { buildReportDraft, makeReceiptNo } from "@/lib/report";
+import { askAgent, lastJson, mask, wxoConfigured } from "@/lib/wxo";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json({ mode: wxoConfigured() ? "live" : "mock" });
+}
+
+function eventPrompt(req: AgentRequest): string {
+  if (req.type === "violation_detected") {
+    const draft = buildReportDraft(req.violation);
+    return [
+      "[대시보드 이벤트] 선행 드론이 긴급출동 진로 방해 의심 차량을 탐지했습니다.",
+      "아래 JSON 은 코드가 계산한 사실입니다. 이것만 근거로 신고서 초안 본문(3~4문장)을 작성하세요.",
+      "위반 확정·과태료·견인 여부는 판단하지 말고 담당자 확인이 필요하다고 적으세요.",
+      '마지막 줄에 {"status":"pending","body":"<초안 본문>"} JSON 한 줄을 출력하세요.',
+      JSON.stringify({
+        event: "violation_detected",
+        plate: req.violation.plate + " (가상)",
+        vehicle: req.violation.vehicleType,
+        reason: req.violation.reason,
+        location: req.violation.locationLabel,
+        coords: draft.coords,
+        detected_at: draft.detectedAt,
+        jurisdiction: draft.jurisdiction,
+        jurisdiction_code: draft.jurisdictionCode,
+        agency: draft.agency,
+        legal_basis: draft.legalBasis,
+        ocr_confidence: req.violation.confidence,
+      }),
+    ].join("\n");
+  }
+  if (req.type === "report_approved") {
+    return [
+      "[대시보드 이벤트] 관제요원이 아래 신고서 초안을 승인했습니다.",
+      "관할 지자체 통보·연계 안내 문구를 2문장으로 작성하세요(주민신고가 아니라 소방 출동 연계 자료 통보). 처분 결정은 관할 담당자가 한다고 적으세요.",
+      '마지막 줄에 {"status":"submitted"} JSON 한 줄을 출력하세요.',
+      JSON.stringify({ event: "report_approved", plate: req.draft.plate, agency: req.draft.agency, title: req.draft.title }),
+    ].join("\n");
+  }
+  return req.context ? `${req.message}\n\n[대시보드 상황]\n${req.context}` : req.message;
+}
+
+function stripJsonLine(text: string): string {
+  return text.replace(/\{[^{}]*"status"[^{}]*\}\s*$/, "").trim();
+}
+
+export async function POST(request: Request) {
+  let req: AgentRequest;
+  try {
+    req = (await request.json()) as AgentRequest;
+  } catch {
+    return NextResponse.json({ error: "잘못된 요청" }, { status: 400 });
+  }
+
+  if (!wxoConfigured()) {
+    return NextResponse.json(mockAgent(req, "IBM 연결 정보 미설정 (MOCK 모드)"));
+  }
+
+  try {
+    const started = Date.now();
+    const { text, threadId } = await askAgent(eventPrompt(req), req.threadId);
+    const secs = ((Date.now() - started) / 1000).toFixed(1);
+    const json = lastJson(text);
+    const clean = stripJsonLine(text);
+
+    let res: AgentResponse;
+    if (req.type === "violation_detected") {
+      const draft = buildReportDraft(req.violation);
+      const body = typeof json?.body === "string" && json.body.trim() ? json.body : clean;
+      if (body) draft.body = body;
+      res = {
+        mode: "live",
+        threadId,
+        status: "pending",
+        draft,
+        message: clean || "신고서 초안이 작성되었습니다.",
+        steps: [
+          { agent: "report", text: `관할 매핑(코드): ${draft.jurisdictionShort}(${draft.jurisdictionCode}) → ${draft.agency}`, delayMs: 300 },
+          { agent: "watsonx", text: `Orchestrate 수퍼바이저 응답 수신 (${secs}s) — 초안 본문 작성`, delayMs: 400 },
+          { agent: "report", text: "신고서 초안 완료 — 사람 승인 대기", delayMs: 300 },
+        ],
+      };
+    } else if (req.type === "report_approved") {
+      const receiptNo = makeReceiptNo();
+      res = {
+        mode: "live",
+        threadId,
+        status: "submitted",
+        receiptNo,
+        message: `${clean} (접수번호 ${receiptNo})`,
+        steps: [
+          { agent: "watsonx", text: `Orchestrate 승인 처리 응답 (${secs}s)`, delayMs: 300 },
+          { agent: "report", text: `접수 완료 — ${receiptNo}`, delayMs: 300 },
+        ],
+      };
+    } else {
+      res = { mode: "live", threadId, message: clean || text, steps: [{ agent: "watsonx", text: `응답 (${secs}s)`, delayMs: 200 }] };
+    }
+    return NextResponse.json(res);
+  } catch (e) {
+    const reason =
+      e instanceof Error && e.name === "AbortError" ? "응답 시간 초과" : mask(e instanceof Error ? e.message : String(e));
+    return NextResponse.json(mockAgent(req, `LIVE 호출 실패 → MOCK 전환: ${reason}`));
+  }
+}

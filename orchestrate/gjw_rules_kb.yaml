@@ -1,0 +1,8 @@
+spec_version: v1
+kind: knowledge_base
+name: gjw_rules_kb
+description: >
+  긴급출동 진로방해·불법주정차 단속 규정 요약(교육용). 도로교통법 제29조(긴급자동차 진로 양보), 제32조(소화전·교차로 모퉁이 5m 정차·주차 금지),
+  소방기본법 제21조의2(소방자동차 전용구역), 신고 처리 원칙, 관제권(9.3km)·회피구역 등 드론 비행 운영 규칙에 대한 질문에 사용합니다.
+documents:
+  - gjw_rules_doc.txt
