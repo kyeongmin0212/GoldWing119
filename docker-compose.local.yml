@@ -1,0 +1,18 @@
+# 이 컴퓨터에서 Docker 로 상시 실행 (포트폴리오 터널이 host.docker.internal:3000 으로 연결)
+# - 개발 서버(npm run dev) 대신 빌드한 앱을 띄운다. Docker Desktop 이 켜지면 같이 켜진다(restart: unless-stopped).
+# - 키·비밀번호는 이미지에 넣지 않고 실행할 때 .env.local 에서 읽는다.
+# - 3000 번은 이 컴퓨터 안에서만 열린다(127.0.0.1). 바깥 접속은 Cloudflare 터널로만.
+# 처음/코드 바뀐 뒤:  docker compose -f docker-compose.local.yml up -d --build
+# 끄기:              docker compose -f docker-compose.local.yml down
+
+name: goldenwing
+
+services:
+  app:
+    build: .
+    image: goldenwing-app
+    container_name: goldenwing
+    restart: unless-stopped
+    env_file: .env.local
+    ports:
+      - "127.0.0.1:3000:3000"
