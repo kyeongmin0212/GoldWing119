@@ -17,7 +17,7 @@ export function middleware(req: NextRequest) {
       /* 잘못된 헤더 */
     }
   }
-  return new NextResponse("인증이 필요합니다", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="G-J Golden Time Wing", charset="UTF-8"' } });
+  return new NextResponse("인증이 필요합니다", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Golden Wing 119", charset="UTF-8"' } });
 }
 
 export const config = {

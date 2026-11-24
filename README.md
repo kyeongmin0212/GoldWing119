@@ -1,4 +1,4 @@
-# G-J 골든타임 윙
+# 골든윙 119 (Golden Wing 119)
 
 119 소방차 앞길 정찰 드론 관제와 진로방해 차량 지자체 통보 초안 — 해커톤 시연용.
 지도·드론 영상·도로 공사는 시뮬레이션이고, 차량번호·혼잡 DB·도로 공사·거점은 모두 가상입니다.
@@ -11,7 +11,7 @@
 | `http://localhost:3000` 상황실 콘솔 | 119 종합상황실 관제요원 + 드론 원격 조종자 | 드론 투입 승인, 드론 조종(원격 조종자 — 시스템은 권장 경로·이륙 시각만 안내), 전방 차단 시 우회로 안내 승인, 진로방해 차량 통보 초안 검토, 에이전트 기록·질의 |
 | `http://localhost:3000/crew` 소방차 태블릿 | 출동 소방대원 | 드론 영상 공유받아 보기, 우회로 안내, 다음 혼잡 구간·길 확보 상태·진로방해 차량 (보기 전용) |
 
-지도는 실제 지도(OpenStreetMap, Leaflet — 키 없음)이고, 인터넷이 끊기면 개략도(SVG)로 자동 대체됩니다. 소방차 경로는 OSRM 으로 받은 실제 도로 모양(`src/data/roadGeometry.ts`, 1회 생성, 다시 만들 때 `node --experimental-strip-types scripts/fetch-roads.mjs .`)을 따라 그리고, 도착 시간·예상 지연·남은 거리도 그 실제 도로 거리로 계산합니다(`src/lib/road.ts` — 시나리오 1: 4.2km(우회 3.9km), 시나리오 2: 3.6km(다른 진입 경로 3.5km)). 구간 속도는 가정값입니다.
+지도는 실제 지도(OpenStreetMap, Leaflet — 키 없음)이고, 인터넷이 끊기면 개략도(SVG)로 자동 대체됩니다. 소방차 경로는 OSRM 으로 받은 실제 도로 모양(`src/data/roadGeometry.ts`, 1회 생성, 다시 만들 때 `node --experimental-strip-types scripts/fetch-roads.mjs .`)을 따라 그리고, 도착 시간·예상 지연·남은 거리도 그 실제 도로 거리로 계산합니다(`src/lib/road.ts` — 시나리오 1: 2.3km(우회 1.9km), 시나리오 2: 1.9km(다른 진입 경로 1.8km)). 구간 속도는 가정값입니다.
 
 지도 바탕(타일)은 OpenStreetMap 서버에서 그때그때 받아 오므로 **시연 노트북에 인터넷이 필요합니다.** 인터넷이 없으면 6초 뒤 개략도로 바뀌고, IBM 에이전트도 MOCK 답으로 바뀝니다.
 
@@ -47,7 +47,9 @@ npm run test:geo   # 투입 판단·도로 따라 정찰·선행 시간·탐지�
 
 ### A. Cloudflare Tunnel (도메인이 Cloudflare 에 있을 때, 권장)
 
-> 현재 시연 주소 `https://goldenwing.kyeongmin0212.com` 은 기존 Cloudflare 터널(Docker 안 cloudflared)에 경로를 하나 추가해 이 컴퓨터의 개발 서버로 연결했습니다. cloudflared 가 Docker 안에서 돌기 때문에 Service URL 은 `http://host.docker.internal:3000` 입니다(`localhost` 는 컨테이너 자신을 가리킴). 컴퓨터·Docker Desktop·개발 서버가 모두 켜져 있어야 열립니다.
+> 현재 시연 주소 `https://goldenwing.kyeongmin0212.com` 은 기존 Cloudflare 터널(Docker 안 cloudflared)에 경로를 하나 추가해 이 컴퓨터의 3000번 포트로 연결했습니다. 앱은 Docker 컨테이너 `goldenwing`(`docker-compose.local.yml`, `127.0.0.1:3000`, Docker Desktop 이 켜지면 같이 켜짐)으로 돕니다. cloudflared 가 Docker 안에서 돌기 때문에 Service URL 은 `http://host.docker.internal:3000` 입니다(`localhost` 는 컨테이너 자신을 가리킴). 컴퓨터·Docker Desktop 이 켜져 있어야 열립니다.
+> - 처음·코드 바뀐 뒤: `docker compose -f docker-compose.local.yml up -d --build` / 끄기: `docker compose -f docker-compose.local.yml down`
+> - 지금은 `.env.local` 의 `MOCK=1` 로 IBM 대신 내장 모의 응답을 씁니다(IBM API 키 만료). 새 키를 넣고 `MOCK=0` 으로 바꾼 뒤 `up -d --force-recreate` 하면 LIVE 로 돌아갑니다.
 
 공인 IP·포트 개방·인증서 없이 앱을 돌리는 컴퓨터(서버 또는 노트북) 하나만 있으면 됩니다.
 
@@ -115,11 +117,11 @@ Orchestrate 가 문서를 나눠 임베딩해 벡터 색인에 넣고, 질문과
 | `src/lib/dispatch.ts` | 드론 투입 규칙 (지연 ≥3분 또는 혼잡 DB 지점 → 1~2대), 배차 (출동 소방서 드론 우선, 운용반경 10km) |
 | `src/lib/geo.ts` | 거리·시간 계산, 관할 매핑(전남광주통합특별시 표기). 회피구역 A* 는 남겨 두었고 지금은 쓰지 않음(추후 보완) |
 | `src/lib/road.ts` | 실제 도로 선 위 거리·위치, 우회로를 넣은 경로 만들기 |
-| `src/lib/simulation.ts` | 소방차·드론 타임라인(드론은 소방차 도로를 따라 정찰), 이륙 시각 조정(선행 4분), 전방 차단 발견·우회 비교, 탐지 시각 |
+| `src/lib/simulation.ts` | 소방차·드론 타임라인(드론은 소방차 도로를 따라 정찰), 이륙 시각 조정(목표 선행 4분, 정찰 구간이 가까우면 짧아짐), 전방 차단 발견·우회 비교, 탐지 시각 |
 | `src/lib/wxo.ts`, `src/app/api/agent/route.ts` | Orchestrate REST 연동, 근거 문서 추출, MOCK 전환 |
 | `src/data/*` | 혼잡 DB, 드론 거점(소방서 6곳 × 3대 = 18대, 가상 위치), 시나리오 2개(도로 막힘·불법주차, 각각 우회로 포함), 실제 도로 모양. 공역 DB(관제권·회피구역)는 보관만 — 추후 보완 |
 | `src/app/api/sync/route.ts`, `src/middleware.ts` | 다른 기기 화면 중계, 접속 비밀번호(선택) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `deploy.env.example` | 서버 배포 |
 | `orchestrate/` | 에이전트 YAML 5개, Python 도구 6개, 지식 문서 5개, 업로드·LIVE 설정·시험 스크립트 |
 
-공식 출처는 `G-J_골든타임윙_참고자료_출처.md`(바탕 화면\IBM AI) 참고.
+공식 출처는 `G-J_골든타임윙_참고자료_출처.md`(공유폴더\취업\02. 프로젝트\06. IBM AI) 참고.

@@ -1,4 +1,4 @@
-// G-J 골든타임 윙 — 공용 타입 정의
+// 골든윙 119 — 공용 타입 정의
 
 export type LatLng = { lat: number; lng: number };
 
