@@ -1,6 +1,16 @@
 # 골든윙 119 (Golden Wing 119)
 
 119 소방차 앞길 정찰 드론 관제와 진로방해 차량 지자체 통보 초안 — 해커톤 시연용.
+
+| 항목 | 내용 |
+|---|---|
+| 성과 | 🏆 IBM AI Academy 6기 해커톤 대상(1위) |
+| 기간 | 2026.11.20 ~ 11.21 |
+| 인원 | 팀 4인 |
+| 내 담당 (노경민) | watsonx Orchestrate 감독·협업 에이전트와 Python 도구를 Next.js 대시보드에 연동 |
+| 기술 | watsonx Orchestrate, RAG, Python, Next.js, Docker |
+| 서비스 | https://goldenwing.kyeongmin0212.com (지금은 IBM 대신 모의 응답 — 아래 서버 배포 A 참고) |
+
 지도·드론 영상·도로 공사는 시뮬레이션이고, 차량번호·혼잡 DB·도로 공사·거점은 모두 가상입니다.
 **비행 제한 구역(관제권·회피구역)은 이번 시연에서 드론 경로에 반영하지 않았습니다 — 추후 보완.** 대신 시나리오 장소는 광주공항 관제권(반경 9.3km) 밖에 두었습니다. 드론 거점은 소방서 6곳(가상 위치)에 두어 드론이 소방차와 같은 소방서에서 출발합니다.
 
@@ -123,5 +133,3 @@ Orchestrate 가 문서를 나눠 임베딩해 벡터 색인에 넣고, 질문과
 | `src/app/api/sync/route.ts`, `src/middleware.ts` | 다른 기기 화면 중계, 접속 비밀번호(선택) |
 | `Dockerfile`, `docker-compose.yml`, `Caddyfile`, `deploy.env.example` | 서버 배포 |
 | `orchestrate/` | 에이전트 YAML 5개, Python 도구 6개, 지식 문서 5개, 업로드·LIVE 설정·시험 스크립트 |
-
-공식 출처는 `G-J_골든타임윙_참고자료_출처.md`(공유폴더\취업\02. 프로젝트\06. IBM AI) 참고.
